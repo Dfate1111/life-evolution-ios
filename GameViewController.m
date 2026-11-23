@@ -66,6 +66,8 @@ static const Stage kStages[] = {
 static const NSInteger kStageCount = sizeof(kStages) / sizeof(kStages[0]);
 
 // 进化到第 i 阶段所需能量（i>=1）
+// 进化费用的整体倍率（越大越难进化）
+static const double kEvolveMult = 3.0;
 static const double kEvolveCost[] = {
     0, 100, 1200, 9000, 60000, 350000, 2.2e6, 1.4e7,
     9e7, 6e8, 4e9, 2.8e10, 2e11, 1.5e12, 1.2e13, 1e14,
@@ -148,10 +150,10 @@ static UIColor *StageAccent(NSInteger i) {
 }
 
 // ================= 数值体系 =================
-static double BaseProd(NSInteger i)  { return 0.1 * pow(5.0, (double)i); }
-static double BaseCost(NSInteger i)  { return 15.0 * pow(5.0, (double)i); }
+static double BaseProd(NSInteger i)  { return 0.08 * pow(5.0, (double)i); }
+static double BaseCost(NSInteger i)  { return 18.0 * pow(5.0, (double)i); }
 // 单条产线每买一级的价格增长率（越大越难堆数量）
-static const double kCostGrowth = 1.17;
+static const double kCostGrowth = 1.18;
 
 // 里程碑门槛：每跨一级该产线产出 ×2，共 20 级（最高 66000 个）
 static const NSInteger kMileStones[] = {
@@ -901,8 +903,8 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     return sum * [self geneMult] * [self boostMult] * [self mutProdMult] * [self difficultyProdMult]
            * [self mutEvoWarmMult] * [self codexMult] * [self relicProdMult] * [self eventProdMult];
 }
-- (double)tapPower { return (1.0 + [self totalProd] * 0.08) * self.combo * [self mutTapMult] * [self geneTapMult] * [self relicTapMult]; }
-- (double)ascThreshold { return 300000.0 * pow(5.0, (double)self.ascensions); }
+- (double)tapPower { return (0.1 + [self totalProd] * 0.05) * self.combo * [self mutTapMult] * [self geneTapMult] * [self relicTapMult]; }
+- (double)ascThreshold { return 2.0e7 * pow(5.0, (double)self.ascensions); }
 // 飞升难度：每次轮回产出效率下调、成本与进化费用上调
 - (double)difficultyProdMult { return MAX(0.25, pow(0.85, (double)self.ascensions)); }
 - (double)difficultyCostMult { return pow(1.22, (double)self.ascensions); }
@@ -2657,7 +2659,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
 
     // 进化环 + 按钮
     if (self.stage < kStageCount - 1) {
-        double cost = kEvolveCost[self.stage + 1] * [self difficultyEvoMult];
+        double cost = kEvolveCost[self.stage + 1] * kEvolveMult * [self difficultyEvoMult];
         if ([self needsBossForStage:self.stage + 1]) {
             self.ringFill.strokeEnd = 1.0;
             self.evolveRoll.text = [NSString stringWithFormat:@"⚔️ 试炼 · 守关者 %@", StageName(self.stage + 1)];
@@ -3725,7 +3727,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         [self startBossForStage:self.stage + 1];
         return;
     }
-    double cost = kEvolveCost[self.stage + 1] * [self difficultyEvoMult];
+    double cost = kEvolveCost[self.stage + 1] * kEvolveMult * [self difficultyEvoMult];
     if (self.energy < cost) { [self toast:@"能量不足，继续积攒！"]; return; }
     self.energy -= cost;
     if (self.energy < 0.0) self.energy = 0.0;

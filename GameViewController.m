@@ -913,7 +913,11 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
            * [self sporeBoostMul];
 }
 - (double)tapPower { return (0.1 + [self totalProd] * 0.05) * self.combo * [self mutTapMult] * [self geneTapMult] * [self relicTapMult]; }
-- (double)ascThreshold { return 2.0e7 * pow(5.0, (double)self.ascensions); }
+- (double)ascThreshold {
+    // 首次 2e7；之后每次按 20 倍递增：4e8 / 8e9 / 1.6e11 …
+    if (self.ascensions <= 0) return 2.0e7;
+    return 2.0e7 * pow(20.0, (double)self.ascensions);
+}
 // 飞升难度：每次轮回产出效率下调、成本与进化费用上调
 - (double)difficultyProdMult { return MAX(0.25, pow(0.85, (double)self.ascensions)); }
 - (double)difficultyCostMult { return pow(1.22, (double)self.ascensions); }

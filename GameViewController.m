@@ -4726,6 +4726,51 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     }
 }
 
+// 单步最优：比较每条产线「再买 1 个」的 产出增量/价格；正跨里程碑的那一步额外加权
+- (NSInteger)aiPickBuyRow {
+    double best = -1.0;
+    NSInteger bestRow = -1;
+    double bestCost = 0.0;
+    for (NSInteger i = 0; i <= self.stage && i < kStageCount; i++) {
+        double cost = [self costFor:i owned:_counts[i] count:1];
+        if (cost <= 0 || cost > self.energy) continue;      // 当前买不起
+        double m0 = (double)_counts[i] * MilestoneMult(_counts[i]);
+        double m1 = (double)(_counts[i] + 1) * MilestoneMult(_counts[i] + 1);
+        double delta = BaseProd(i) * (m1 - m0);
+        if (delta <= 0) continue;
+        double score = delta / cost;                        // 每点能量换到的产出
+        if (MilestoneMult(_counts[i] + 1) > MilestoneMult(_counts[i]) * 1.0001) {
+            score *= 2.2;                                   // 正卡在里程碑：这一步产出翻倍，优先插队
+        }
+        // 分数接近时选更贵的那条（基础产出更高，长期增长更快，也更接近下一个里程碑）
+        BOOL take = NO;
+        if (score > best * 1.0005) take = YES;
+        else if (best > 0 && score > best * 0.995 && cost > bestCost) take = YES;
+        if (bestRow < 0 || take) { best = score; bestRow = i; bestCost = cost; }
+    }
+    return bestRow;
+}
+
+// 一轮最多买 24 个，每个都重算；留够进化费的 85% 就不再花
+- (void)aiBuyLoop:(double)evoCost {
+    double floorEnergy = (evoCost > 0) ? evoCost * 0.85 : 0.0;
+    NSInteger bought = 0;
+    while (bought < 24) {
+        if (self.energy <= floorEnergy) break;
+        NSInteger row = [self aiPickBuyRow];
+        if (row < 0) break;
+        double cost = [self costFor:row owned:_counts[row] count:1];
+        if (cost <= 0 || self.energy - cost < floorEnergy) break;
+        self.energy -= cost;
+        _counts[row] += 1;
+        bought += 1;
+    }
+    if (bought > 0) {
+        [self refreshDynamic];
+        [self refreshRows];
+    }
+}
+
 // 托管选变异：按"对自动玩法收益最大"排序（高效代谢 > 掠食强化 > 暴击系 > 连击系 > 孢子系）
 - (void)aiPickMutation {
     if (!self.aiOn || !self.mutationSheetOpen || self.mutationCandidates.count == 0) return;
@@ -4804,28 +4849,8 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         self.aiNextEvolveAt = now + 14.0;
         return;
     }
-    // 6) 已经摸到进化费 85% 才停手攒钱，其余时候一直把能量投成产能
-    if (evoCost > 0 && self.energy >= evoCost * 0.85) return;
-    NSInteger best = [self bestRowIndex];
-    if (best < 0) return;                       // 连最便宜的 1 个都买不起 → 等能量
-
-    // 花销上限：默认花掉 90%，只有能量已远超进化费时才花光（避免能量永远显示 0）
-    double spendCap = self.energy * 0.90;
-    if (evoCost > 0 && self.energy >= evoCost * 1.6) spendCap = self.energy;
-
-    NSInteger n = 0;
-    double total = 0.0;
-    while (n < 5000) {
-        double c = [self costFor:best owned:_counts[best] + n count:1];
-        if (c <= 0 || total + c > spendCap) break;
-        total += c;
-        n += 1;
-    }
-    if (n < 1) return;
-    self.energy -= total;
-    _counts[best] += n;
-    [self refreshDynamic];
-    [self refreshRows];
+    // 6) 逐个买：每买 1 个都重新算一遍"每点能量的产出增量"，谁当前最划算就买谁
+    [self aiBuyLoop:evoCost];
 }
 
 - (void)onReset {

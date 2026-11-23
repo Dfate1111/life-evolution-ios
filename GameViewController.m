@@ -4383,6 +4383,11 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         NSInteger startLv = [self geneStartLineLevel];
         for (NSInteger i = 0; i < kStageCount; i++) _counts[i] = startLv;
         for (NSInteger i = 0; i < MutKinds; i++) _muts[i] = 0;
+        // 彻底抹掉所有 v3_* 存档键，避免遗漏字段（如 bossfail/bossr/autodiff）在重置后残留
+        NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+        for (NSString *k in [[ud dictionaryRepresentation] allKeys]) {
+            if ([k hasPrefix:@"v3_"]) [ud removeObjectForKey:k];
+        }
         [self clearFeeds];
         [self playSFX:@"ascend"];
         [self applyTheme:YES];
@@ -4412,6 +4417,9 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         self.geneAscendLevel = 0; self.geneStartLevel = 0; self.geneSporeRateLevel = 0; self.geneBossLevel = 0;
         self.totalEarned = 0;
         self.maxStage = 0; self.relicPoints = 0; self.totalTaps = 0;
+        // 自适应难度/反噬累积必须一起归零，否则"重置存档"后压力仍残留（v7.5.4 修复）
+        self.autoDiff = 0; self.fastEvoCount = 0; self.bossRushCount = 0;
+        for (NSInteger i = 0; i < 64; i++) _bossFails[i] = 0;
         for (NSInteger i = 0; i < kRelicCount; i++) _relicLv[i] = 0;
         for (NSInteger i = 0; i < 64; i++) { _bossDoneRound[i] = NO; _bossDone[i] = NO; }
         for (NSInteger i = 0; i < 8; i++) _achDone[i] = NO;

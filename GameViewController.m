@@ -691,6 +691,8 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @property (nonatomic) NSTimeInterval nextEventAt;
 @property (nonatomic, strong) UIView *codexPage, *relicPage;
 @property (nonatomic, strong) NSMutableArray<UILabel *> *codexNameLabels, *codexLoreLabels, *codexStatusLabels;
+@property (nonatomic, strong) NSMutableArray *codexCards;
+@property (nonatomic, strong) NSMutableArray<UILabel *> *codexIconLabels, *codexEraLabels;
 @property (nonatomic, strong) NSMutableArray<UIButton *> *relicBtns;
 @property (nonatomic, strong) UILabel *relicPointLabel, *achTitleLabel;
 @property (nonatomic, strong) NSMutableArray<UILabel *> *achLabels;
@@ -1940,6 +1942,9 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     self.codexNameLabels = [NSMutableArray array];
     self.codexLoreLabels = [NSMutableArray array];
     self.codexStatusLabels = [NSMutableArray array];
+    self.codexCards = [NSMutableArray array];
+    self.codexIconLabels = [NSMutableArray array];
+    self.codexEraLabels = [NSMutableArray array];
 
     for (NSInteger i = 0; i < kStageCount; i++) {
         CGFloat y = 6 + i * 82;
@@ -1947,6 +1952,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
         card.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
         card.layer.cornerRadius = 14;
         [sc addSubview:card];
+        [self.codexCards addObject:card];
 
         UILabel *ic = [[UILabel alloc] initWithFrame:CGRectMake(8, 17, 40, 40)];
         ic.text = StageEmoji(i);
@@ -1956,6 +1962,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
         ic.layer.cornerRadius = 10;
         ic.clipsToBounds = YES;
         [card addSubview:ic];
+        [self.codexIconLabels addObject:ic];
 
         UILabel *nm = [[UILabel alloc] initWithFrame:CGRectMake(56, 10, W - 28 - 150, 20)];
         nm.text = StageName(i);
@@ -1969,6 +1976,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
         era.font = [UIFont systemFontOfSize:9.5];
         era.textColor = [UIColor colorWithWhite:1 alpha:0.4];
         [card addSubview:era];
+        [self.codexEraLabels addObject:era];
 
         UILabel *lore = [[UILabel alloc] initWithFrame:CGRectMake(56, 44, W - 28 - 66, 26)];
         lore.font = [UIFont systemFontOfSize:9.5];
@@ -1988,19 +1996,51 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 
 - (void)refreshCodexPage {
     if (self.codexPage.hidden) return;
+    // 只亮出已抵达形态 + 之后两个预告，剩下全部是迷雾
+    NSInteger revealTo = MIN(kStageCount - 1, self.maxStage + 2);
     for (NSInteger i = 0; i < (NSInteger)self.codexNameLabels.count && i < kStageCount; i++) {
         BOOL unlocked = (i <= self.maxStage);
-        self.codexNameLabels[i].textColor = unlocked ? [UIColor whiteColor] : [UIColor colorWithWhite:1 alpha:0.35];
-        self.codexLoreLabels[i].text = unlocked
-            ? [NSString stringWithUTF8String:kLore[i]]
-            : @"🔒 尚未抵达这个时代";
-        self.codexLoreLabels[i].textColor = unlocked
-            ? [UIColor colorWithWhite:1 alpha:0.55]
-            : [UIColor colorWithWhite:1 alpha:0.25];
-        self.codexStatusLabels[i].text = unlocked ? [NSString stringWithFormat:@"+%ld%%", (long)(2 * (i + 1))] : @"锁定";
-        self.codexStatusLabels[i].textColor = unlocked
-            ? [UIColor colorWithRed:0.55 green:0.95 blue:0.70 alpha:1]
-            : [UIColor colorWithWhite:1 alpha:0.3];
+        BOOL preview = (!unlocked && i <= revealTo);
+        UILabel *nmL = self.codexNameLabels[i];
+        UILabel *loreL = self.codexLoreLabels[i];
+        UILabel *stL = self.codexStatusLabels[i];
+        UIView *card = self.codexCards[i];
+        UILabel *icL = self.codexIconLabels[i];
+        UILabel *eraL = self.codexEraLabels[i];
+
+        if (preview || unlocked) {
+            card.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
+            icL.text = StageEmoji(i);
+            nmL.text = StageName(i);
+            eraL.text = [NSString stringWithFormat:@"第 %ld 形态 · %@", (long)(i + 1), StageEra(i)];
+            eraL.textColor = [UIColor colorWithWhite:1 alpha:0.4];
+        } else {
+            // 迷雾
+            card.backgroundColor = [UIColor colorWithWhite:1 alpha:0.02];
+            icL.text = @"🌫";
+            nmL.text = @"？？？";
+            eraL.text = [NSString stringWithFormat:@"第 %ld 形态 · 迷雾之中", (long)(i + 1)];
+            eraL.textColor = [UIColor colorWithWhite:1 alpha:0.18];
+        }
+
+        nmL.textColor = unlocked ? [UIColor whiteColor]
+                     : (preview ? [UIColor colorWithWhite:1 alpha:0.55] : [UIColor colorWithWhite:1 alpha:0.22]);
+        if (unlocked) {
+            loreL.text = [NSString stringWithUTF8String:kLore[i]];
+            loreL.textColor = [UIColor colorWithWhite:1 alpha:0.55];
+            stL.text = [NSString stringWithFormat:@"+%ld%%", (long)(2 * (i + 1))];
+            stL.textColor = [UIColor colorWithRed:0.55 green:0.95 blue:0.70 alpha:1];
+        } else if (preview) {
+            loreL.text = @"🔒 再前进一点就能看清它的轮廓";
+            loreL.textColor = [UIColor colorWithWhite:1 alpha:0.3];
+            stL.text = @"锁定";
+            stL.textColor = [UIColor colorWithWhite:1 alpha:0.3];
+        } else {
+            loreL.text = @"🌫 迷雾尚未散开，继续进化才有可能窥见";
+            loreL.textColor = [UIColor colorWithWhite:1 alpha:0.16];
+            stL.text = @"迷雾";
+            stL.textColor = [UIColor colorWithWhite:1 alpha:0.18];
+        }
     }
 }
 

@@ -704,6 +704,10 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @property (nonatomic) NSInteger bossTarget;
 @property (nonatomic, strong) NSTimer *bossTimer;
 @property (weak, nonatomic) UIButton *musicBtn;
+@property (weak, nonatomic) UIButton *aiBtn;          // 🤖 AI 托管开关
+@property (nonatomic) BOOL aiOn;                     // 托管是否开启
+@property (nonatomic, strong) NSTimer *aiTimer;
+@property (nonatomic) NSTimeInterval aiNextEvolveAt; // 托管下次允许进化的时间
 @property (nonatomic, strong) UIView *artScrim;
 @property (nonatomic) NSInteger artShown;
 @property (nonatomic, strong) RollLabel *dnaRoll;
@@ -1254,6 +1258,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     self.dna = [d integerForKey:@"v3_dna"];
     self.ascensions = [d integerForKey:@"v3_asc"];
     self.offlineUnlocked = [d boolForKey:@"v3_offline"];
+    self.aiOn = [d boolForKey:@"v3_ai"];
     self.geneOfflineLevel = [d integerForKey:@"v3_gene_offline_lv"];
     if (self.offlineUnlocked && self.geneOfflineLevel <= 0) self.geneOfflineLevel = 1;
     self.geneLevel = [d integerForKey:@"v3_gene"];
@@ -1298,6 +1303,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     [d setInteger:self.dna forKey:@"v3_dna"];
     [d setInteger:self.ascensions forKey:@"v3_asc"];
     [d setBool:self.offlineUnlocked forKey:@"v3_offline"];
+    [d setBool:self.aiOn forKey:@"v3_ai"];
     [d setInteger:self.geneOfflineLevel forKey:@"v3_gene_offline_lv"];
     [d setInteger:self.geneLevel forKey:@"v3_gene"];
     [d setInteger:self.geneTapLevel forKey:@"v3_gene_tap"];
@@ -1459,6 +1465,19 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     [self.view addSubview:music];
     self.musicBtn = music;
 
+    UIButton *aib = [UIButton buttonWithType:UIButtonTypeSystem];
+    aib.frame = CGRectMake(W - 122, 104, 50, 50);
+    [aib setTitle:@"🤖" forState:UIControlStateNormal];
+    aib.titleLabel.font = [UIFont systemFontOfSize:24];
+    aib.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+    aib.layer.cornerRadius = 25;
+    aib.layer.borderWidth = 1;
+    aib.layer.borderColor = [[UIColor colorWithWhite:1 alpha:0.22] CGColor];
+    aib.clipsToBounds = YES;
+    [aib addTarget:self action:@selector(onToggleAI) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:aib];
+    self.aiBtn = aib;
+
     // ---- 生物区 ----
     CGFloat zoneY = 116;
     CGFloat zoneH = MAX(170, MIN(205, H * 0.24));
@@ -1470,6 +1489,9 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     self.creatureArea = zone;
     [self.view addSubview:self.creatureArea];
     if (self.musicBtn) [self.view bringSubviewToFront:self.musicBtn];
+    if (self.aiBtn) [self.view bringSubviewToFront:self.aiBtn];
+    [self updateAIButton];
+    if (self.aiOn) [self startAITimer];
 
     self.creatureNameLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, W, 24)];
     self.creatureNameLabel.textAlignment = NSTextAlignmentCenter;
@@ -4603,6 +4625,120 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         [self saveState];
         [self toast:[NSString stringWithFormat:@"🕊 飞升成功！+%@🧬 · 🔮 遗物点 +2 · 新的轮回开始", FmtInt(gain)]];
     }];
+}
+
+// ================= AI 托管（规则型策略 AI，纯本地、不联网） =================
+- (void)onToggleAI {
+    self.aiOn = !self.aiOn;
+    if (self.aiOn) {
+        [self startAITimer];
+        [self updateAIButton];
+        [self toast:@"🤖 AI 托管开启：自动购买 · 自动进化 · 自动打试炼 · 自动点孢子"];
+    } else {
+        [self stopAITimer];
+        [self updateAIButton];
+        [self toast:@"🤖 AI 托管已关闭"];
+    }
+    [self saveState];
+}
+
+- (void)updateAIButton {
+    if (self.aiBtn == nil) return;
+    [self.aiBtn setTitle:@"🤖" forState:UIControlStateNormal];
+    if (self.aiOn) {
+        self.aiBtn.backgroundColor = [UIColor colorWithRed:0.44 green:0.27 blue:0.95 alpha:0.95];
+        self.aiBtn.layer.borderColor = [UIColor colorWithRed:0.76 green:0.58 blue:1.0 alpha:1.0].CGColor;
+        if ([self.aiBtn.layer animationForKey:@"aiBreath"] == nil) {
+            CABasicAnimation *b = [CABasicAnimation animationWithKeyPath:@"opacity"];
+            b.fromValue = @0.72; b.toValue = @1.0;
+            b.duration = 1.1; b.autoreverses = YES; b.repeatCount = HUGE_VALF;
+            [self.aiBtn.layer addAnimation:b forKey:@"aiBreath"];
+        }
+    } else {
+        self.aiBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+        self.aiBtn.layer.borderColor = [[UIColor colorWithWhite:1 alpha:0.22] CGColor];
+        [self.aiBtn.layer removeAnimationForKey:@"aiBreath"];
+        self.aiBtn.alpha = 0.9;
+    }
+}
+
+- (void)startAITimer {
+    if (self.aiTimer != nil) return;
+    self.aiTimer = [NSTimer timerWithTimeInterval:0.5 target:self selector:@selector(aiTick) userInfo:nil repeats:YES];
+    [[NSRunLoop mainRunLoop] addTimer:self.aiTimer forMode:NSRunLoopCommonModes];
+}
+
+- (void)stopAITimer {
+    [self.aiTimer invalidate];
+    self.aiTimer = nil;
+}
+
+// 托管打守关者：0.5 秒结算 4 次点击（等效 8 次/秒，人手极限），特效降频避免卡顿
+- (void)aiHitBoss {
+    if (self.bossOverlay == nil) return;
+    double dmg = [self tapPower] * [self geneBossMult] * 4.0;
+    self.bossHP -= dmg;
+    [self updateBossLabels];
+    CGFloat W = self.view.bounds.size.width, H = self.view.bounds.size.height;
+    CGPoint pt = CGPointMake(W * (0.40 + 0.20 * (double)arc4random_uniform(100) / 100.0),
+                             H * (0.30 + 0.12 * (double)arc4random_uniform(100) / 100.0));
+    if ((NSInteger)arc4random_uniform(4) == 0) {
+        UIColor *hit = [UIColor colorWithRed:1.0 green:0.42 blue:0.32 alpha:1];
+        [self sparkBurstAt:pt color:hit count:8 speed:150];
+        [self floatText:[NSString stringWithFormat:@"⚔️ -%@", FmtNum(dmg)] color:hit at:pt];
+    }
+    if (self.bossHP <= 0) [self finishBoss:YES];
+}
+
+- (void)aiTick {
+    if (!self.aiOn) return;
+    if (self.currentTab != 0) return;          // 只看护"生命"页，避免打乱其他页面
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+
+    // 1) 有试炼在打：全力攻击
+    if (self.bossOverlay != nil) { [self aiHitBoss]; return; }
+    // 2) 孢子出现就点
+    if (self.sporeActive && self.sporeBtn != nil) [self onSpore];
+    // 3) 负面事件可解除时按收益判断是否付钱
+    if (self.eventKind > 0 && self.eventCleanseBtn != nil && !self.eventCleanseBtn.hidden
+        && self.cleanseCost > 0 && self.energy > self.cleanseCost * 1.6) {
+        [self onCleanseEvent];
+    }
+
+    BOOL last = (self.stage >= kStageCount - 1);
+    double evoCost = 0;
+    if (!last) {
+        evoCost = kEvolveCost[self.stage + 1] * kEvolveMult * [self difficultyEvoMult]
+                * [self evoGeneTax] * [self autoEvoMult];
+    }
+    if (last) return;
+
+    // 4) 有关卡试炼未过：攒够进化费就主动开战（失败 2 次则不再硬碰）
+    if ([self needsBossForStage:self.stage + 1] && _bossFails[self.stage + 1] < 2
+        && self.energy >= evoCost && now >= self.aiNextEvolveAt) {
+        [self onEvolve];
+        self.aiNextEvolveAt = now + 14.0;
+        return;
+    }
+    // 5) 能进化且离上次进化 ≥14s（避免触发"进化过快"惩罚）
+    if (![self needsBossForStage:self.stage + 1] && evoCost > 0
+        && self.energy >= evoCost && now >= self.aiNextEvolveAt) {
+        [self onEvolve];
+        self.aiNextEvolveAt = now + 14.0;
+        return;
+    }
+    // 6) 离进化费还有一半以上差距时才投产线，否则攒钱冲刺进化
+    if (evoCost > 0 && self.energy >= evoCost * 0.5) return;
+    NSInteger best = [self bestRowIndex];
+    if (best < 0) return;
+    NSInteger n = [self maxAffordableFor:best owned:_counts[best]];
+    if (n < 1) return;
+    double cost = [self costFor:best owned:_counts[best] count:n];
+    if (cost > self.energy) return;
+    self.energy -= cost;
+    _counts[best] += n;
+    [self refreshDynamic];
+    [self refreshRows];
 }
 
 - (void)onReset {

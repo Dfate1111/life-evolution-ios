@@ -1094,10 +1094,15 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     [self.view addSubview:reset];
 
     UIButton *music = [UIButton buttonWithType:UIButtonTypeSystem];
-    music.frame = CGRectMake(W - 44, 106, 30, 26);
+    music.frame = CGRectMake(W - 62, 104, 50, 50);
     [music setTitle:@"🔊" forState:UIControlStateNormal];
-    music.titleLabel.font = [UIFont systemFontOfSize:14];
-    music.alpha = 0.85;
+    music.titleLabel.font = [UIFont systemFontOfSize:26];
+    music.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+    music.layer.cornerRadius = 25;
+    music.layer.borderWidth = 1;
+    music.layer.borderColor = [[UIColor colorWithWhite:1 alpha:0.22] CGColor];
+    music.clipsToBounds = YES;
+    music.alpha = 0.95;
     [music addTarget:self action:@selector(onToggleMusic) forControlEvents:UIControlEventTouchUpInside];
     [self.view addSubview:music];
     self.musicBtn = music;
@@ -1112,6 +1117,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     };
     self.creatureArea = zone;
     [self.view addSubview:self.creatureArea];
+    if (self.musicBtn) [self.view bringSubviewToFront:self.musicBtn];
 
     self.creatureNameLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, W, 24)];
     self.creatureNameLabel.textAlignment = NSTextAlignmentCenter;
@@ -2556,10 +2562,14 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
         self.musicEra = -1;
         [self updateMusicForEra:[self eraIndexForStage:self.stage]];
         [self.musicBtn setTitle:@"🔊" forState:UIControlStateNormal];
+        self.musicBtn.alpha = 1.0;
+        [self toast:@"🔊 配乐已开启"];
     } else {
         for (AVAudioPlayer *p in @[self.musicA]) { [p stop]; }
         self.musicA = nil;
         [self.musicBtn setTitle:@"🔇" forState:UIControlStateNormal];
+        self.musicBtn.alpha = 0.62;
+        [self toast:@"🔇 配乐已静音"];
     }
 }
 

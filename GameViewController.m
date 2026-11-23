@@ -819,6 +819,211 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 }
 @end
 
+// ===== 飞升确认弹窗：自定义暗色卡片（替代系统白底 UIAlertController） =====
+@interface AscendDialogView : UIView
+@property (nonatomic, strong) UIView *card;
+@property (nonatomic, copy) void (^onConfirm)(void);
++ (void)presentInView:(UIView *)host gain:(NSInteger)gain prod:(double)np cost:(double)nc
+                   evo:(double)ne fast:(NSInteger)fast autoP:(NSInteger)ap
+               confirm:(void (^)(void))confirm;
+@end
+
+@implementation AscendDialogView
+
++ (void)presentInView:(UIView *)host gain:(NSInteger)gain prod:(double)np cost:(double)nc
+                  evo:(double)ne fast:(NSInteger)fast autoP:(NSInteger)ap
+              confirm:(void (^)(void))confirm {
+    AscendDialogView *d = [[AscendDialogView alloc] initWithFrame:host.bounds];
+    d.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    d.onConfirm = confirm;
+    [d buildGain:gain prod:np cost:nc evo:ne fast:fast autoP:ap];
+    [host addSubview:d];
+    d.alpha = 0.0;
+    d.card.transform = CGAffineTransformMakeScale(0.86, 0.86);
+    [UIView animateWithDuration:0.32 delay:0 usingSpringWithDamping:0.74 initialSpringVelocity:0.4
+                         options:UIViewAnimationOptionAllowUserInteraction animations:^{
+        d.alpha = 1.0;
+        d.card.transform = CGAffineTransformIdentity;
+    } completion:nil];
+}
+
+- (UILabel *)putLabel:(NSString *)text font:(UIFont *)font color:(UIColor *)color
+                 frame:(CGRect)fr align:(NSTextAlignment)al lines:(NSInteger)ln to:(UIView *)pv {
+    UILabel *l = [[UILabel alloc] initWithFrame:fr];
+    l.text = text;
+    l.font = font;
+    l.textColor = color;
+    l.textAlignment = al;
+    l.numberOfLines = ln;
+    if (ln == 1) l.adjustsFontSizeToFitWidth = YES;
+    [pv addSubview:l];
+    return l;
+}
+
+- (void)onBackdropTap:(UITapGestureRecognizer *)g {
+    CGPoint p = [g locationInView:self];
+    if (CGRectContainsPoint(self.card.frame, p)) return;
+    [self close];
+}
+
+- (void)close {
+    [UIView animateWithDuration:0.18 animations:^{
+        self.alpha = 0.0;
+        self.card.transform = CGAffineTransformMakeScale(0.92, 0.92);
+    } completion:^(BOOL f) {
+        [self removeFromSuperview];
+    }];
+}
+
+- (void)onCancelTap { [self close]; }
+
+- (void)onConfirmTap {
+    void (^cb)(void) = self.onConfirm;
+    [self close];
+    if (cb) cb();
+}
+
+- (void)buildGain:(NSInteger)gain prod:(double)np cost:(double)nc evo:(double)ne
+              fast:(NSInteger)fast autoP:(NSInteger)ap {
+    self.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.58];
+    UITapGestureRecognizer *tk = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onBackdropTap:)];
+    tk.cancelsTouchesInView = NO;
+    [self addGestureRecognizer:tk];
+
+    CGFloat W = self.bounds.size.width, H = self.bounds.size.height;
+    CGFloat cw = MIN(W - 44.0, 376.0);
+    CGFloat pad = 20.0;
+    CGFloat inW = cw - pad * 2.0;
+
+    UIView *card = [[UIView alloc] initWithFrame:CGRectMake((W - cw) / 2.0, 0, cw, 400)];
+    card.layer.cornerRadius = 26.0;
+    card.backgroundColor = [UIColor colorWithRed:0.085 green:0.055 blue:0.135 alpha:1];
+    card.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
+    card.layer.borderColor = [UIColor colorWithRed:0.62 green:0.42 blue:1.0 alpha:0.55].CGColor;
+    card.clipsToBounds = YES;
+    self.card = card;
+
+    CAGradientLayer *grad = [CAGradientLayer layer];
+    grad.colors = @[(id)[UIColor colorWithRed:0.19 green:0.10 blue:0.30 alpha:1].CGColor,
+                    (id)[UIColor colorWithRed:0.07 green:0.045 blue:0.11 alpha:1].CGColor];
+    grad.startPoint = CGPointMake(0.15, 0.0);
+    grad.endPoint = CGPointMake(0.85, 1.0);
+    grad.frame = card.bounds;
+    [card.layer insertSublayer:grad atIndex:0];
+
+    CGFloat y = 18.0;
+    [self putLabel:@"🕊" font:[UIFont systemFontOfSize:32 weight:UIFontWeightRegular]
+             color:[UIColor whiteColor] frame:CGRectMake(0, y, cw, 42)
+             align:NSTextAlignmentCenter lines:1 to:card];
+    y += 42.0;
+    [self putLabel:@"飞升" font:[UIFont systemFontOfSize:23 weight:UIFontWeightBold]
+             color:[UIColor colorWithRed:0.90 green:0.82 blue:1.0 alpha:1] frame:CGRectMake(0, y, cw, 30)
+             align:NSTextAlignmentCenter lines:1 to:card];
+    y += 30.0;
+    [self putLabel:@"本轮生命将归于起源" font:[UIFont systemFontOfSize:12.5]
+             color:[UIColor colorWithWhite:1 alpha:0.5] frame:CGRectMake(0, y, cw, 18)
+             align:NSTextAlignmentCenter lines:1 to:card];
+    y += 24.0;
+
+    UIView *gainBox = [[UIView alloc] initWithFrame:CGRectMake(pad, y, inW, 74)];
+    gainBox.backgroundColor = [UIColor colorWithWhite:1 alpha:0.07];
+    gainBox.layer.cornerRadius = 16.0;
+    [card addSubview:gainBox];
+
+    CGFloat halfW = inW / 2.0;
+    [self putLabel:@"🧬 DNA" font:[UIFont systemFontOfSize:10.5 weight:UIFontWeightSemibold]
+             color:[UIColor colorWithWhite:1 alpha:0.5] frame:CGRectMake(0, 12, halfW, 16)
+             align:NSTextAlignmentCenter lines:1 to:gainBox];
+    [self putLabel:[NSString stringWithFormat:@"+%@", FmtInt(gain)]
+             font:[UIFont monospacedDigitSystemFontOfSize:19 weight:UIFontWeightBold]
+             color:[UIColor colorWithRed:0.85 green:0.60 blue:1.0 alpha:1] frame:CGRectMake(0, 28, halfW, 24)
+             align:NSTextAlignmentCenter lines:1 to:gainBox];
+    [self putLabel:@"永久保留" font:[UIFont systemFontOfSize:10]
+             color:[UIColor colorWithWhite:1 alpha:0.35] frame:CGRectMake(0, 50, halfW, 14)
+             align:NSTextAlignmentCenter lines:1 to:gainBox];
+
+    [self putLabel:@"🔮 遗物点" font:[UIFont systemFontOfSize:10.5 weight:UIFontWeightSemibold]
+             color:[UIColor colorWithWhite:1 alpha:0.5] frame:CGRectMake(halfW, 12, halfW, 16)
+             align:NSTextAlignmentCenter lines:1 to:gainBox];
+    [self putLabel:@"+2" font:[UIFont monospacedDigitSystemFontOfSize:19 weight:UIFontWeightBold]
+             color:[UIColor colorWithRed:1.0 green:0.80 blue:0.45 alpha:1] frame:CGRectMake(halfW, 28, halfW, 24)
+             align:NSTextAlignmentCenter lines:1 to:gainBox];
+    [self putLabel:@"可强化遗物" font:[UIFont systemFontOfSize:10]
+             color:[UIColor colorWithWhite:1 alpha:0.35] frame:CGRectMake(halfW, 50, halfW, 14)
+             align:NSTextAlignmentCenter lines:1 to:gainBox];
+
+    UIView *sep = [[UIView alloc] initWithFrame:CGRectMake(halfW - 0.5, y + 14, 1, 46)];
+    sep.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12];
+    [card addSubview:sep];
+
+    y += 74.0 + 10.0;
+    [self putLabel:@"能量 · 物种 · 变异路线将重置" font:[UIFont systemFontOfSize:11]
+             color:[UIColor colorWithWhite:1 alpha:0.40] frame:CGRectMake(0, y, cw, 16)
+             align:NSTextAlignmentCenter lines:1 to:card];
+    y += 26.0;
+
+    [self putLabel:@"⚠️ 下一轮更难" font:[UIFont systemFontOfSize:13 weight:UIFontWeightBold]
+             color:[UIColor colorWithRed:1.0 green:0.72 blue:0.35 alpha:1]
+             frame:CGRectMake(pad, y, inW, 18) align:NSTextAlignmentLeft lines:1 to:card];
+    y += 21.0;
+    [self putLabel:[NSString stringWithFormat:@"产出 ×%.2f · 成本 ×%.2f · 进化 ×%.2f", np, nc, ne]
+             font:[UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium]
+             color:[UIColor colorWithWhite:1 alpha:0.72] frame:CGRectMake(pad, y, inW, 17)
+             align:NSTextAlignmentLeft lines:1 to:card];
+    y += 26.0;
+
+    [self putLabel:[NSString stringWithFormat:@"🎚 自适应难度 · 本轮过快 %ld 次", (long)fast]
+             font:[UIFont systemFontOfSize:12 weight:UIFontWeightSemibold]
+             color:[UIColor colorWithWhite:1 alpha:fast > 0 ? 0.78 : 0.45]
+             frame:CGRectMake(pad, y, inW, 17) align:NSTextAlignmentLeft lines:1 to:card];
+    y += 19.0;
+    [self putLabel:[NSString stringWithFormat:@"产出 ×%.2f  成本 ×%.2f  进化 ×%.2f\n门槛 ×%.2f  守关 ×%.2f  DNA ×%.2f",
+                   pow(0.92, (double)(ap * 3)), pow(1.08, (double)(ap * 3)), pow(1.14, (double)(ap * 3)),
+                   pow(1.15, (double)(ap * 3)), pow(1.35, (double)(ap * 3)), pow(0.85, (double)(ap * 3))]
+             font:[UIFont monospacedDigitSystemFontOfSize:11.5 weight:UIFontWeightRegular]
+             color:[UIColor colorWithWhite:1 alpha:0.55] frame:CGRectMake(pad, y, inW, 34)
+             align:NSTextAlignmentLeft lines:2 to:card];
+
+    CGFloat btnY = 336.0, btnH = 50.0;
+    CGFloat bw = (inW - 12.0) / 2.0;
+
+    UIButton *cancel = [UIButton buttonWithType:UIButtonTypeCustom];
+    cancel.frame = CGRectMake(pad, btnY, bw, btnH);
+    cancel.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
+    cancel.layer.cornerRadius = 14.0;
+    cancel.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
+    cancel.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
+    [cancel setTitle:@"再想想" forState:UIControlStateNormal];
+    [cancel setTitleColor:[UIColor colorWithWhite:1 alpha:0.72] forState:UIControlStateNormal];
+    cancel.titleLabel.font = [UIFont systemFontOfSize:15.5 weight:UIFontWeightMedium];
+    [cancel addTarget:self action:@selector(onCancelTap) forControlEvents:UIControlEventTouchUpInside];
+    [card addSubview:cancel];
+
+    UIButton *ok = [UIButton buttonWithType:UIButtonTypeCustom];
+    ok.frame = CGRectMake(pad + bw + 12.0, btnY, bw, btnH);
+    ok.layer.cornerRadius = 14.0;
+    ok.clipsToBounds = YES;
+    CAGradientLayer *bg = [CAGradientLayer layer];
+    bg.frame = ok.bounds;
+    bg.colors = @[(id)[UIColor colorWithRed:0.52 green:0.30 blue:0.98 alpha:1].CGColor,
+                  (id)[UIColor colorWithRed:0.86 green:0.36 blue:0.72 alpha:1].CGColor];
+    bg.startPoint = CGPointMake(0.0, 0.0);
+    bg.endPoint = CGPointMake(1.0, 1.0);
+    [ok.layer insertSublayer:bg atIndex:0];
+    [ok setTitle:@"🕊 飞升！" forState:UIControlStateNormal];
+    [ok setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    ok.titleLabel.font = [UIFont systemFontOfSize:16.5 weight:UIFontWeightBold];
+    [ok addTarget:self action:@selector(onConfirmTap) forControlEvents:UIControlEventTouchUpInside];
+    [card addSubview:ok];
+
+    CGFloat cardH = btnY + btnH + 20.0;
+    card.frame = CGRectMake((W - cw) / 2.0, (H - cardH) / 2.0, cw, cardH);
+    grad.frame = card.bounds;
+
+    [self addSubview:card];
+}
+@end
+
 @implementation GameViewController
 
 - (void)viewDidLoad {
@@ -4360,12 +4565,11 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     if (gain <= 0) return;
     double nextProd = MAX(0.25, pow(0.85, (double)(self.ascensions + 1)));
     double nextCost = pow(1.22, (double)(self.ascensions + 1));
-    NSInteger nextAuto = MIN(6, self.fastEvoCount / 3);
-    NSString *msg = [NSString stringWithFormat:@"本轮生命将归于起源，获得 %@ 🧬DNA 与 🔮 遗物点 +2。\nDNA 永久保留；能量、物种、变异路线将重置。\n\n⚠️ 下一轮难度提升：产出效率 ×%.2f、购买成本 ×%.2f、进化费用 ×%.2f。\n🎚 自适应难度：本轮进化过快 %ld 次 → 下一轮产出 ×%.2f、成本 ×%.2f、进化费 ×%.2f、飞升门槛 ×%.2f、守关血量 ×%.2f、DNA ×%.2f。", FmtInt(gain), nextProd, nextCost, pow(1.30, (double)(self.ascensions + 1)), (long)self.fastEvoCount, pow(0.92, (double)(nextAuto * 3)), pow(1.08, (double)(nextAuto * 3)),
-               pow(1.14, (double)(nextAuto * 3)), pow(1.15, (double)(nextAuto * 3)), pow(1.35, (double)(nextAuto * 3)), pow(0.85, (double)(nextAuto * 3))];
-    UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"🕊 飞升" message:msg preferredStyle:UIAlertControllerStyleAlert];
-    [ac addAction:[UIAlertAction actionWithTitle:@"再想想" style:UIAlertActionStyleCancel handler:nil]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"飞升！" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+    NSInteger nextAuto = MIN(6, (self.fastEvoCount + self.bossRushCount * 2) / 3);
+    [AscendDialogView presentInView:self.view gain:gain prod:nextProd cost:nextCost
+                                evo:pow(1.30, (double)(self.ascensions + 1))
+                               fast:self.fastEvoCount autoP:nextAuto
+                           confirm:^{
         self.dna += gain;
         self.ascensions += 1;
         self.relicPoints += 2;
@@ -4383,11 +4587,6 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         NSInteger startLv = [self geneStartLineLevel];
         for (NSInteger i = 0; i < kStageCount; i++) _counts[i] = startLv;
         for (NSInteger i = 0; i < MutKinds; i++) _muts[i] = 0;
-        // 彻底抹掉所有 v3_* 存档键，避免遗漏字段（如 bossfail/bossr/autodiff）在重置后残留
-        NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-        for (NSString *k in [[ud dictionaryRepresentation] allKeys]) {
-            if ([k hasPrefix:@"v3_"]) [ud removeObjectForKey:k];
-        }
         [self clearFeeds];
         [self playSFX:@"ascend"];
         [self applyTheme:YES];
@@ -4403,8 +4602,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         [self refreshAll];
         [self saveState];
         [self toast:[NSString stringWithFormat:@"🕊 飞升成功！+%@🧬 · 🔮 遗物点 +2 · 新的轮回开始", FmtInt(gain)]];
-    }]];
-    [self presentViewController:ac animated:YES completion:nil];
+    }];
 }
 
 - (void)onReset {
@@ -4425,6 +4623,11 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         for (NSInteger i = 0; i < 8; i++) _achDone[i] = NO;
         for (NSInteger i = 0; i < kStageCount; i++) _bossDone[i] = NO;
 
+        // 彻底抹掉所有 v3_* 存档键，避免遗漏字段（如 bossfail/bossr/autodiff）在重置后残留
+        NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
+        for (NSString *k in [[ud dictionaryRepresentation] allKeys]) {
+            if ([k hasPrefix:@"v3_"]) [ud removeObjectForKey:k];
+        }
         [self clearFeeds];
         for (NSInteger i = 0; i < kStageCount; i++) _counts[i] = 0;
         for (NSInteger i = 0; i < MutKinds; i++) _muts[i] = 0;

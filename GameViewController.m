@@ -631,9 +631,9 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 // 临时状态
 @property (nonatomic) double combo;
 @property (nonatomic) NSTimeInterval lastTapTime;
-@property (nonatomic) NSTimeInterval boostEnd;
-@property (nonatomic) NSTimeInterval boostCooldownEnd;
-@property (nonatomic) NSTimeInterval skipCooldownEnd;
+
+
+
 @property (nonatomic) NSInteger buyQtyMode;      // 0:1 1:10 2:100 3:最大
 @property (nonatomic) BOOL sporeActive;
 @property (nonatomic) BOOL mutationSheetOpen;
@@ -677,8 +677,8 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @property (nonatomic, strong) RollLabel *dnaRoll;
 @property (nonatomic, strong) RollLabel *evolveRoll;
 @property (nonatomic, strong) RollLabel *ascendRoll;
-@property (nonatomic, strong) RollLabel *boostRoll;
-@property (nonatomic, strong) RollLabel *skipRoll;
+
+
 @property (nonatomic, strong) UILabel *autoLabel;
 @property (nonatomic, strong) UILabel *rateLabel;
 @property (nonatomic, strong) UIButton *dnaBtn;
@@ -702,8 +702,8 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @property (nonatomic, strong) UILabel *creatureLabel;
 @property (nonatomic, strong) UILabel *comboLabel;
 @property (nonatomic) double secAccum;
-@property (nonatomic, strong) UIButton *boostBtn;
-@property (nonatomic, strong) UIButton *skipBtn;
+
+
 @property (nonatomic, strong) UIButton *evolveBtn;
 @property (nonatomic, strong) UILabel *ascLabel;
 @property (nonatomic, strong) UILabel *ascPctLabel;
@@ -844,9 +844,9 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 
     // 呼吸辉光，加速中更亮
     CFTimeInterval t = CACurrentMediaTime();
-    CGFloat base = ([self boostMult] > 1.0) ? 0.55 : 0.32;
+    CGFloat base = 0.32;
     self.energyRoller.glowLabel.layer.shadowOpacity = base + 0.20 * (0.5 + 0.5 * sin(t * 1.7));
-    self.energyRoller.textColor = ([self boostMult] > 1.0) ? StageAccent(self.stage) : [UIColor whiteColor];
+    self.energyRoller.textColor = [UIColor whiteColor];
 }
 
 - (BOOL)prefersStatusBarHidden { return YES; }
@@ -879,7 +879,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     return 1.0;
 }
 - (double)eventCostMult { return (self.eventKind == 4) ? 1.35 : 1.0; }
-- (double)boostMult      { return ([[NSDate date] timeIntervalSince1970] < self.boostEnd) ? 7.0 : 1.0; }
+- (double)boostMult      { return 1.0; }   // 加速功能已移除
 - (double)mutTapMult     { return 1.0 + 0.30 * _muts[MutTap]; }
 - (double)mutProdMult    { return 1.0 + 0.20 * _muts[MutProd]; }
 - (double)mutCritChance  { return MIN(0.75, 0.15 * _muts[MutCrit] + 0.10 * _muts[MutCritUp]); }   // 暴击概率
@@ -887,7 +887,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 - (double)mutEvoWarmMult { return ([[NSDate date] timeIntervalSince1970] < self.evoWarmUntil) ? (1.0 + 0.4 * (double)_muts[MutEvoWarm]) : 1.0; }
 - (double)mutBoostTapMult{ return 1.0; }   // 加速类变异已移除
 - (double)comboHoldTime  { return 1.2 + 1.0 * _muts[MutComboHold]; }   // 停手多久开始衰减
-- (double)boostDuration  { return 30.0; }
+
 - (double)comboCap       { return 5.0 + 1.0 * _muts[MutCombo]; }
 - (NSInteger)mutTotal {
     NSInteger t = 0;
@@ -1211,30 +1211,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     self.comboLabel.font = [UIFont boldSystemFontOfSize:16];
     [self.creatureArea addSubview:self.comboLabel];
 
-    CGFloat y = zoneY + zoneH + 4;
-
-    // ---- 两颗胶囊按钮 ----
-    CGFloat pillW = (W - 52) / 2;
-    self.boostBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.boostBtn.frame = CGRectMake(18, y, pillW, 32);
-    self.boostBtn.layer.cornerRadius = 16;
-    self.boostBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
-    self.boostBtn.titleLabel.font = [UIFont boldSystemFontOfSize:11.5];
-    [self.boostBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    [self.boostBtn addTarget:self action:@selector(onBoost) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:self.boostBtn];
-    self.boostRoll = [self attachRollLabelToButton:self.boostBtn];
-
-    self.skipBtn = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.skipBtn.frame = CGRectMake(18 + pillW + 16, y, pillW, 32);
-    self.skipBtn.layer.cornerRadius = 16;
-    self.skipBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
-    self.skipBtn.titleLabel.font = [UIFont boldSystemFontOfSize:11.5];
-    [self.skipBtn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-    [self.skipBtn addTarget:self action:@selector(onSkip) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:self.skipBtn];
-    self.skipRoll = [self attachRollLabelToButton:self.skipBtn];
-    y += 40;
+    CGFloat y = zoneY + zoneH + 6;
 
     // ---- 进化按钮 ----
     self.evolveBtn = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -2637,8 +2614,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     [self updateArtForStage:self.stage];
     [self updateMusicForEra:[self eraIndexForStage:self.stage]];
     // 顶部数字由 CADisplayLink 平滑驱动，这里不再直接赋值，避免跳动
-    self.autoLabel.text = [NSString stringWithFormat:@"💧 自动 +%@/秒%@", FmtNum([self totalProd]),
-                           ([self boostMult] > 1) ? @"  ⚡×7加速中" : @""];
+    self.autoLabel.text = [NSString stringWithFormat:@"💧 自动 +%@/秒", FmtNum([self totalProd])];
     self.rateLabel.text = [NSString stringWithFormat:@"👆 点击 %@/次    ⏳ 离线收益 %@",
                            FmtNum([self tapPower]),
                            ([self geneEffLevel:0] > 0)
@@ -2720,26 +2696,6 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
         self.ascendRoll.textColor = [UIColor colorWithWhite:1 alpha:0.45];
     }
 
-    // 加速 / 跳过
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now < self.boostEnd) {
-        self.boostRoll.text = [NSString stringWithFormat:@"⏳ ×7  %lds", (long)(self.boostEnd - now)];
-        self.boostBtn.backgroundColor = [UIColor colorWithRed:0.72 green:0.5 blue:0.15 alpha:0.85];
-    } else if (now < self.boostCooldownEnd) {
-        self.boostRoll.text = [NSString stringWithFormat:@"加速冷却 %lds", (long)(self.boostCooldownEnd - now)];
-        self.boostBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.05];
-    } else {
-        self.boostRoll.text = @"▶ 产出 ×7（30秒）";
-        self.boostBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
-    }
-
-    if (now < self.skipCooldownEnd) {
-        self.skipRoll.text = [NSString stringWithFormat:@"⏳ 跳过冷却 %@", [self shortTime:self.skipCooldownEnd - now]];
-        self.skipBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.05];
-    } else {
-        self.skipRoll.text = @"⏳ 跳过 2 小时";
-        self.skipBtn.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
-    }
 }
 
 - (NSString *)shortTime:(NSTimeInterval)sec {
@@ -3697,33 +3653,6 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     [self saveState];
 }
 
-// ================= 加速 / 跳过 =================
-- (void)onBoost {
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now < self.boostEnd) { [self toast:@"产出加速中，等它结束吧"]; return; }
-    if (now < self.boostCooldownEnd) { [self toast:@"加速还在冷却"]; return; }
-    self.boostEnd = now + [self boostDuration];
-    self.boostCooldownEnd = self.boostEnd + 120.0;
-    [self refreshDynamic];
-    [self toast:[NSString stringWithFormat:@"⚡ 产出 ×7 开始（%.0f 秒）", [self boostDuration]]];
-}
-
-- (void)onSkip {
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    if (now < self.skipCooldownEnd) { [self toast:[NSString stringWithFormat:@"跳过还在冷却（%@）", [self shortTime:self.skipCooldownEnd - now]]]; return; }
-    double gain = [self totalProd] * 7200.0 * 0.5;
-    if (gain <= 0) { [self toast:@"还没有自动产出，先去购买物种"]; return; }
-    self.energy += gain;
-    self.runEarned += gain;
-    self.totalEarned += gain;
-    self.skipCooldownEnd = now + 4 * 3600.0;
-    [self refreshDynamic];
-    [self refreshRows];
-    [self floatGain:gain prefix:@"⏳" color:[UIColor colorWithRed:0.52 green:0.56 blue:1.0 alpha:1]
-                 size:22 at:[self creatureCenterInView] rise:90];
-    [self toast:[NSString stringWithFormat:@"⏳ 跳过 2 小时 ⚡+%@", FmtNum(gain)]];
-}
-
 // ================= 进化 =================
 - (void)onEvolve {
     if (self.stage >= kStageCount - 1) { [self toast:@"已经是最终形态啦"]; return; }
@@ -4008,7 +3937,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         for (NSInteger i = 0; i < kRelicCount; i++) _relics[i] = NO;
         for (NSInteger i = 0; i < 8; i++) _achDone[i] = NO;
         for (NSInteger i = 0; i < kStageCount; i++) _bossDone[i] = NO;
-        self.boostEnd = 0; self.boostCooldownEnd = 0; self.skipCooldownEnd = 0;
+
         [self clearFeeds];
         for (NSInteger i = 0; i < kStageCount; i++) _counts[i] = 0;
         for (NSInteger i = 0; i < MutKinds; i++) _muts[i] = 0;

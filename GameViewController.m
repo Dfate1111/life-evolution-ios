@@ -223,6 +223,7 @@ static const GeneDef kGenes[] = {
     {"🕊", "飞升红利",   "飞升获得的 DNA +20%／级"},
     {"🌱", "起始遗泽",   "飞升后每条产线自带等级（每 2 级 +1，最高 60）"},
     {"🌠", "孢子之频",   "孢子出现间隔 -10%／级"},
+    {"⚔️", "试炼锋芒",   "对守关者伤害 +35%／级（点破试炼更轻松）"},
 };
 static const NSInteger kGeneCount = sizeof(kGenes) / sizeof(kGenes[0]);
 
@@ -618,6 +619,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     BOOL _relics[8];            // 遗物是否已购
     BOOL _achDone[16];          // 成就是否已达成
     BOOL _bossDone[64];         // 各守关者是否通过
+    NSInteger _bossFails[64];   // 本次轮回各守关者的失败次数（满 2 次封锁，须飞升重开）
 }
 // 运行状态
 @property (nonatomic) double energy;
@@ -725,7 +727,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @property (nonatomic, strong) NSMutableArray<RollLabel *> *genePriceRolls;
 @property (nonatomic, strong) NSMutableArray<RollLabel *> *geneSubRolls;
 @property (nonatomic) NSInteger geneTapLevel, geneSporeLevel, geneAutoLevel, geneOfflineLevel;
-@property (nonatomic) NSInteger geneAscendLevel, geneStartLevel, geneSporeRateLevel;
+@property (nonatomic) NSInteger geneAscendLevel, geneStartLevel, geneSporeRateLevel, geneBossLevel;
 @property (nonatomic) NSInteger geneQtyMode;      // 0=1级 1=10级 2=最大
 @property (nonatomic, strong) NSMutableArray<UIButton *> *geneQtyBtns;
 @property (nonatomic, strong) NSMutableArray<UILabel *> *mutCountLabels;
@@ -863,6 +865,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 - (double)geneTapMult    { return 1.0 + 0.30 * (double)[self geneEffLevel:2]; }
 - (double)geneSporeMult  { return 1.0 + 0.40 * (double)[self geneEffLevel:3]; }
 - (double)geneAscendMult { return 1.0 + 0.20 * (double)[self geneEffLevel:5]; }
+- (double)geneBossMult   { return 1.0 + 0.35 * (double)[self geneEffLevel:8]; }
 - (double)geneSporeRateMult { return MAX(0.10, 1.0 - 0.10 * (double)[self geneEffLevel:7]); }
 
 // 起始遗泽：每条产线起始等级（每 2 级 +1，最多 60 级）
@@ -976,6 +979,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     self.geneAscendLevel = [d integerForKey:@"v3_gene_asc"];
     self.geneStartLevel = [d integerForKey:@"v3_gene_start"];
     self.geneSporeRateLevel = [d integerForKey:@"v3_gene_sporerate"];
+    self.geneBossLevel = [d integerForKey:@"v3_gene_boss"];
     self.buyQtyMode = [d integerForKey:@"v3_qty"];
     self.maxStage = MAX([d integerForKey:@"v3_maxstage"], self.stage);
     self.relicPoints = [d integerForKey:@"v3_relicpts"];
@@ -986,6 +990,8 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
         _achDone[i] = [d boolForKey:[NSString stringWithFormat:@"v3_ach_%ld", (long)i]];
     for (NSInteger i = 0; i < kStageCount; i++)
         _bossDone[i] = [d boolForKey:[NSString stringWithFormat:@"v3_boss_%ld", (long)i]];
+    for (NSInteger i = 0; i < 64; i++)
+        _bossFails[i] = [d integerForKey:[NSString stringWithFormat:@"v3_bossfail_%ld", (long)i]];
     [self applyOffline];
 }
 
@@ -1012,6 +1018,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     [d setInteger:self.geneAscendLevel forKey:@"v3_gene_asc"];
     [d setInteger:self.geneStartLevel forKey:@"v3_gene_start"];
     [d setInteger:self.geneSporeRateLevel forKey:@"v3_gene_sporerate"];
+    [d setInteger:self.geneBossLevel forKey:@"v3_gene_boss"];
     [d setInteger:self.buyQtyMode forKey:@"v3_qty"];
     [d setInteger:self.maxStage forKey:@"v3_maxstage"];
     [d setInteger:self.relicPoints forKey:@"v3_relicpts"];
@@ -1022,6 +1029,8 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
         [d setBool:_achDone[i] forKey:[NSString stringWithFormat:@"v3_ach_%ld", (long)i]];
     for (NSInteger i = 0; i < kStageCount; i++)
         [d setBool:_bossDone[i] forKey:[NSString stringWithFormat:@"v3_boss_%ld", (long)i]];
+    for (NSInteger i = 0; i < 64; i++)
+        [d setInteger:_bossFails[i] forKey:[NSString stringWithFormat:@"v3_bossfail_%ld", (long)i]];
     [d setDouble:[[NSDate date] timeIntervalSince1970] forKey:@"v3_lastSeen"];
     [d synchronize];
 }
@@ -1646,6 +1655,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
         case 5: return self.geneAscendLevel;
         case 6: return self.geneStartLevel;
         case 7: return self.geneSporeRateLevel;
+        case 8: return self.geneBossLevel;
         default: return 0;
     }
 }
@@ -1663,6 +1673,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
         case 5: return 2;    // 飞升红利
         case 6: return 3;    // 起始遗泽
         case 7: return 1;    // 孢子之频
+        case 8: return 2;    // 试炼锋芒
         default: return 1;
     }
 }
@@ -1713,6 +1724,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     if (i == 5) return self.geneAscendLevel + 2;
     if (i == 6) return self.geneStartLevel + 3;
     if (i == 7) return self.geneSporeRateLevel + 1;
+    if (i == 8) return self.geneBossLevel + 2;
     return [self geneLevelFor:i] + 1;
 }
 
@@ -1821,6 +1833,10 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
         case 7:
             self.geneSporeRateLevel += k;
             msg = [NSString stringWithFormat:@"🌠 孢子之频 Lv.%@（间隔 %.0f%%）", FmtInt(self.geneSporeRateLevel), [self geneSporeRateMult] * 100];
+            break;
+        case 8:
+            self.geneBossLevel += k;
+            msg = [NSString stringWithFormat:@"⚔️ 试炼锋芒 Lv.%@（对守关者伤害 +%.0f%%）", FmtInt(self.geneBossLevel), 35.0 * self.geneBossLevel];
             break;
     }
     [self saveState];
@@ -2674,9 +2690,17 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
         double cost = kEvolveCost[self.stage + 1] * kEvolveMult * [self difficultyEvoMult] * [self evoGeneTax];
         if ([self needsBossForStage:self.stage + 1]) {
             self.ringFill.strokeEnd = 1.0;
-            self.evolveRoll.text = [NSString stringWithFormat:@"⚔️ 试炼 · 守关者 %@", StageName(self.stage + 1)];
-            self.evolveBtn.backgroundColor = [UIColor colorWithRed:0.62 green:0.16 blue:0.20 alpha:1];
-            self.evolveBtn.alpha = 1;
+            NSInteger fails = _bossFails[self.stage + 1];
+            if (fails >= 2) {
+                self.evolveRoll.text = [NSString stringWithFormat:@"⛔️ 试炼封锁 · 需飞升重开"];
+                self.evolveBtn.backgroundColor = [UIColor colorWithWhite:0.35 alpha:1];
+                self.evolveBtn.alpha = 0.75;
+            } else {
+                self.evolveRoll.text = [NSString stringWithFormat:@"⚔️ 试炼 · 守关者 %@（剩 %ld 次）",
+                                        StageName(self.stage + 1), (long)(2 - fails)];
+                self.evolveBtn.backgroundColor = [UIColor colorWithRed:0.62 green:0.16 blue:0.20 alpha:1];
+                self.evolveBtn.alpha = 1;
+            }
             self.energyRoller.textColor = [UIColor whiteColor];
         } else {
         self.ringFill.strokeEnd = MIN(1.0, self.energy / cost);
@@ -2869,7 +2893,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
 
     UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(0, H * 0.60, W, 20)];
     hint.text = [NSString stringWithFormat:@"连续点击守关者造成伤害 · 40 秒内点破（约 %.0f 次）",
-                 MAX(1.0, self.bossMaxHP / ((0.1 + [self totalProd] * 0.05) * [self mutTapMult] * [self geneTapMult] * [self relicTapMult]))];
+                 MAX(1.0, self.bossMaxHP / (((0.1 + [self totalProd] * 0.05) * [self mutTapMult] * [self geneTapMult] * [self relicTapMult]) * [self geneBossMult]))];
     hint.textAlignment = NSTextAlignmentCenter;
     hint.font = [UIFont systemFontOfSize:11.5];
     hint.textColor = [UIColor colorWithWhite:1 alpha:0.45];
@@ -2907,7 +2931,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
 
 - (void)onBossTap {
     if (self.bossOverlay == nil) return;
-    double dmg = [self tapPower];
+    double dmg = [self tapPower] * [self geneBossMult];
     self.bossHP -= dmg;
     [self updateBossLabels];
     [self vibrateLight];
@@ -2933,6 +2957,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     self.bossFill = nil;
     if (win) {
         _bossDone[t] = YES;
+        _bossFails[t] = 0;
         NSInteger reward = 5 + (t / 6) * 4;
         self.dna += reward;
         [self flashScreen:[UIColor colorWithRed:1 green:0.85 blue:0.4 alpha:1] alpha:0.5];
@@ -2942,8 +2967,15 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
         [self saveState];
         [self refreshAll];
     } else {
-        [self toast:@"试炼失败，蓄力之后再来一次"];
+        _bossFails[t] = MIN(2, _bossFails[t] + 1);
         [self shakeScreen:5];
+        if (_bossFails[t] >= 2) {
+            [self toast:@"⛔️ 本关试炼已封锁：请飞升重开轮回，用 DNA 强化后再来"];
+        } else {
+            [self toast:[NSString stringWithFormat:@"试炼失败，还剩 1 次机会（再次失败将封锁本关）"]];
+        }
+        [self saveState];
+        [self refreshAll];
     }
 }
 
@@ -3792,10 +3824,14 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
 - (void)onEvolve {
     if (self.stage >= kStageCount - 1) { [self toast:@"已经是最终形态啦"]; return; }
     if ([self needsBossForStage:self.stage + 1]) {
+        if (_bossFails[self.stage + 1] >= 2) {
+            [self toast:@"⛔️ 本关试炼已封锁：飞升重开轮回，用 DNA 点「⚔️ 试炼锋芒」再来"];
+            return;
+        }
         [self startBossForStage:self.stage + 1];
         return;
     }
-    double cost = kEvolveCost[self.stage + 1] * kEvolveMult * [self difficultyEvoMult];
+    double cost = kEvolveCost[self.stage + 1] * kEvolveMult * [self difficultyEvoMult] * [self evoGeneTax];
     if (self.energy < cost) { [self toast:@"能量不足，继续积攒！"]; return; }
     self.energy -= cost;
     if (self.energy < 0.0) self.energy = 0.0;
@@ -4057,6 +4093,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         self.runEarned = 0;
         self.stage = 0;
         self.combo = 1.0;
+        for (NSInteger i = 0; i < 64; i++) _bossFails[i] = 0;
         NSInteger startLv = [self geneStartLineLevel];
         for (NSInteger i = 0; i < kStageCount; i++) _counts[i] = startLv;
         for (NSInteger i = 0; i < MutKinds; i++) _muts[i] = 0;
@@ -4086,7 +4123,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         self.energy = 0; self.shownEnergy = 0; self.runEarned = 0; self.stage = 0; self.combo = 1;
         self.dna = 0; self.ascensions = 0; self.offlineUnlocked = NO; self.geneLevel = 0;
         self.geneTapLevel = 0; self.geneSporeLevel = 0; self.geneAutoLevel = 0; self.geneOfflineLevel = 0;
-        self.geneAscendLevel = 0; self.geneStartLevel = 0; self.geneSporeRateLevel = 0;
+        self.geneAscendLevel = 0; self.geneStartLevel = 0; self.geneSporeRateLevel = 0; self.geneBossLevel = 0;
         self.totalEarned = 0;
         self.maxStage = 0; self.relicPoints = 0; self.totalTaps = 0;
         for (NSInteger i = 0; i < kRelicCount; i++) _relics[i] = NO;

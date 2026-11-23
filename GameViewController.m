@@ -3030,7 +3030,8 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     [self updateArtForStage:self.stage];
     [self updateMusicForEra:[self eraIndexForStage:self.stage]];
     // 顶部数字由 CADisplayLink 平滑驱动，这里不再直接赋值，避免跳动
-    self.autoLabel.text = [NSString stringWithFormat:@"💧 自动 +%@/秒", FmtNum([self totalProd])];
+    self.autoLabel.text = [NSString stringWithFormat:@"💧 自动 +%@/秒%@", FmtNum([self totalProd]),
+                           self.aiOn ? @" · 🤖 托管中" : @""];
     [self updateSporePill];
     self.rateLabel.text = [NSString stringWithFormat:@"👆 点击 %@/次    ⏳ 离线收益 %@",
                            FmtNum([self tapPower]),
@@ -4642,6 +4643,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     if (self.aiOn) {
         [self startAITimer];
         [self updateAIButton];
+        [self aiTick];      // 立刻跑一轮，点开就能看到它开始买
         [self toast:@"🤖 AI 托管开启：自动购买 · 自动进化 · 自动打试炼 · 自动点孢子"];
     } else {
         [self stopAITimer];
@@ -4802,15 +4804,25 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         self.aiNextEvolveAt = now + 14.0;
         return;
     }
-    // 6) 离进化费还有一半以上差距时才投产线，否则攒钱冲刺进化
-    if (evoCost > 0 && self.energy >= evoCost * 0.5) return;
+    // 6) 已经摸到进化费 85% 才停手攒钱，其余时候一直把能量投成产能
+    if (evoCost > 0 && self.energy >= evoCost * 0.85) return;
     NSInteger best = [self bestRowIndex];
-    if (best < 0) return;
-    NSInteger n = [self maxAffordableFor:best owned:_counts[best]];
+    if (best < 0) return;                       // 连最便宜的 1 个都买不起 → 等能量
+
+    // 花销上限：默认花掉 90%，只有能量已远超进化费时才花光（避免能量永远显示 0）
+    double spendCap = self.energy * 0.90;
+    if (evoCost > 0 && self.energy >= evoCost * 1.6) spendCap = self.energy;
+
+    NSInteger n = 0;
+    double total = 0.0;
+    while (n < 5000) {
+        double c = [self costFor:best owned:_counts[best] + n count:1];
+        if (c <= 0 || total + c > spendCap) break;
+        total += c;
+        n += 1;
+    }
     if (n < 1) return;
-    double cost = [self costFor:best owned:_counts[best] count:n];
-    if (cost > self.energy) return;
-    self.energy -= cost;
+    self.energy -= total;
     _counts[best] += n;
     [self refreshDynamic];
     [self refreshRows];

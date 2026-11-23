@@ -913,10 +913,20 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
            * [self sporeBoostMul];
 }
 - (double)tapPower { return (0.1 + [self totalProd] * 0.05) * self.combo * [self mutTapMult] * [self geneTapMult] * [self relicTapMult]; }
+// 已投入的 DNA 强化总等级（单项按 200 级封顶计入，避免无限等级把难度打爆）
+- (NSInteger)totalGeneLevels {
+    NSInteger sum = 0;
+    for (NSInteger i = 0; i < kGeneCount; i++) sum += MIN([self geneLevelFor:i], 200);
+    return sum;
+}
+// 基因税：DNA 点得越多，进化与飞升越贵
+- (double)ascGeneTax { return MIN(60.0, pow(1.05, (double)[self totalGeneLevels])); }
+- (double)evoGeneTax { return MIN(25.0, pow(1.03, (double)[self totalGeneLevels])); }
+
 - (double)ascThreshold {
-    // 首次 2e7；之后每次按 20 倍递增：4e8 / 8e9 / 1.6e11 …
-    if (self.ascensions <= 0) return 2.0e7;
-    return 2.0e7 * pow(20.0, (double)self.ascensions);
+    // 首次 2e7；之后每次按 20 倍递增：4e8 / 8e9 / 1.6e11 …，再叠加基因税
+    double base = (self.ascensions <= 0) ? 2.0e7 : 2.0e7 * pow(20.0, (double)self.ascensions);
+    return base * [self ascGeneTax];
 }
 // 飞升难度：每次轮回产出效率下调、成本与进化费用上调
 - (double)difficultyProdMult { return MAX(0.25, pow(0.85, (double)self.ascensions)); }
@@ -1555,7 +1565,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 
     UILabel *note = [[UILabel alloc] initWithFrame:CGRectMake(20, kGeneCount * 100 + 6, W - 40, 54)];
     note.numberOfLines = 3;
-    note.text = @"DNA 只能通过飞升获得：飞升阈值每轮 ×4，收益越高得到的 DNA 越多。";
+    note.text = @"DNA 只能通过飞升获得：飞升门槛每轮 ×20，收益越高 DNA 越多。你投入的 DNA 强化等级越多，进化费用与下次飞升门槛越高（基因税）。";
     note.font = [UIFont systemFontOfSize:10.5];
     note.textColor = [UIColor colorWithWhite:1 alpha:0.35];
     [geneScroll addSubview:note];
@@ -2661,7 +2671,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
 
     // 进化环 + 按钮
     if (self.stage < kStageCount - 1) {
-        double cost = kEvolveCost[self.stage + 1] * kEvolveMult * [self difficultyEvoMult];
+        double cost = kEvolveCost[self.stage + 1] * kEvolveMult * [self difficultyEvoMult] * [self evoGeneTax];
         if ([self needsBossForStage:self.stage + 1]) {
             self.ringFill.strokeEnd = 1.0;
             self.evolveRoll.text = [NSString stringWithFormat:@"⚔️ 试炼 · 守关者 %@", StageName(self.stage + 1)];
@@ -2692,9 +2702,11 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     ff.size.width = self.ascTrack.bounds.size.width * ratio;
     self.ascFill.frame = ff;
     self.ascPctLabel.text = [NSString stringWithFormat:@"%.0f%%", ratio * 100];
-    self.ascLabel.text = self.ascensions == 0
+    double tax = [self ascGeneTax];
+    NSString *ascBase = (self.ascensions == 0)
         ? [NSString stringWithFormat:@"%@ 时首次飞升", FmtNum(th)]
         : [NSString stringWithFormat:@"第%ld次飞升 %@", (long)(self.ascensions + 1), FmtNum(th)];
+    self.ascLabel.text = (tax > 1.02) ? [ascBase stringByAppendingFormat:@" · 基因×%.1f", tax] : ascBase;
     if (gain > 0 && !self.ascendGlowOn) {
         self.ascendGlowOn = YES;
         self.ascendBtn.layer.shadowColor = [UIColor colorWithRed:0.78 green:0.62 blue:1.0 alpha:1].CGColor;

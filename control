@@ -1,6 +1,6 @@
 Package: com.demo.lifeevolution
 Name: 生命进化
-Version: 7.5.1
+Version: 7.5.2
 Architecture: iphoneos-arm64
 Description: 生命进化点击放置游戏
 Maintainer: demo

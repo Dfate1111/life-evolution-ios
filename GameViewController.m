@@ -791,6 +791,33 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @property (nonatomic, strong) NSTimer *tickTimer;
 @end
 
+// ===== 多指同时攻击：单个 UITapGestureRecognizer 只承载 1 指，2 指以上同时落下会整体判定失败，
+// 这里改成 touchesBegan 逐指结算，每根手指按下都独立算一次攻击 =====
+@protocol BossHitTarget <NSObject>
+- (void)bossHitAtWindowPoint:(CGPoint)p;
+@end
+
+@interface BossTapView : UIView
+@property (nonatomic, weak) id<BossHitTarget> bossOwner;
+@end
+
+@implementation BossTapView
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesBegan:touches withEvent:event];
+    id<BossHitTarget> o = self.bossOwner;
+    if (!o) return;
+    for (UITouch *t in touches) {
+        [o bossHitAtWindowPoint:[t locationInView:nil]];
+    }
+}
+- (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesEnded:touches withEvent:event];
+}
+- (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    [super touchesCancelled:touches withEvent:event];
+}
+@end
+
 @implementation GameViewController
 
 - (void)viewDidLoad {
@@ -3017,12 +3044,10 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     hint.textColor = [UIColor colorWithWhite:1 alpha:0.45];
     [ov addSubview:hint];
 
-    UIView *tap = [[UIView alloc] initWithFrame:CGRectMake(0, H * 0.16, W, H * 0.54)];
+    BossTapView *tap = [[BossTapView alloc] initWithFrame:CGRectMake(0, H * 0.16, W, H * 0.54)];
     tap.userInteractionEnabled = YES;
-    UITapGestureRecognizer *gr = [[UITapGestureRecognizer alloc] initWithTarget:self
-                                            action:@selector(onBossTapGesture:)];
-    gr.cancelsTouchesInView = NO;
-    [tap addGestureRecognizer:gr];
+    tap.multipleTouchEnabled = YES;
+    tap.bossOwner = (id<BossHitTarget>)self;
     [ov addSubview:tap];
 
     // 守关者血量按“需要点多少次”定，随关卡递增；基础点击取不含连击的裸伤害
@@ -3050,6 +3075,10 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     f.size.width = (self.view.bounds.size.width - 80) * ratio;
     self.bossFill.frame = f;
     self.bossHPLabel.text = [NSString stringWithFormat:@"%@ / %@", FmtNum(self.bossHP), FmtNum(self.bossMaxHP)];
+}
+
+- (void)bossHitAtWindowPoint:(CGPoint)p {
+    [self damageBossAt:[self.view convertPoint:p fromView:nil]];
 }
 
 - (void)onBossTapGesture:(UITapGestureRecognizer *)g {

@@ -132,7 +132,7 @@ typedef struct { const char *icon; const char *name; const char *desc; NSInteger
 static const Relic kRelics[] = {
     {"🌊", "潮汐之心", "全产出 +15%", 1},
     {"🦴", "掠食之爪", "点击收益 +20%", 1},
-    {"👑", "孢子王冠", "金色孢子收益 +30%", 2},
+    {"👑", "孢子王冠", "孢子增益强度 +30%", 2},
     {"🔑", "升维密钥", "飞升获得 DNA +10%", 2},
     {"🪨", "起源遗骸", "飞升后每条产线额外 +5 级", 3},
     {"🌫", "静默之幕", "时代事件持续时间 -25%", 2},
@@ -204,7 +204,7 @@ static const Mutation kMuts[] = {
     {"🎯", "猎手直觉", "点击 15% 概率暴击 3 倍"},
     {"⏳", "节奏掌控", "连击保持时间 +1 秒"},
     {"🌀", "群体共鸣", "连击上限 +1"},
-    {"✨", "孢子狂喜", "孢子收益 +80%"},
+    {"✨", "孢子狂喜", "孢子增益强度 +80%"},
     {"🎇", "连锁暴击", "暴击概率 +10%"},
     {"🌧", "孢子雨",   "点击时 6% 概率额外获得一份孢子收益"},
     {"🎼", "节奏大师", "连击每层加成由 +0.1 提升到 +0.14"},
@@ -218,7 +218,7 @@ static const GeneDef kGenes[] = {
     {"⏳", "离线收益",   "离开时返还产出（每级 +10%，最高 100%，上限每级 +1 小时）"},
     {"🧬", "基因强化",   "全产出 +50%／级"},
     {"👆", "点击强化",   "点击收益 +30%／级"},
-    {"✨", "孢子亲和",   "金色孢子收益 +40%／级"},
+    {"✨", "孢子亲和",   "孢子增益强度 +40%／级"},
     {"🤖", "自动触手",   "每秒自动点击 1 次／级（不计连击）"},
     {"🕊", "飞升红利",   "飞升获得的 DNA +20%／级"},
     {"🌱", "起始遗泽",   "飞升后每条产线自带等级（每 2 级 +1，最高 60）"},
@@ -731,6 +731,8 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @property (nonatomic, strong) NSMutableArray<UILabel *> *recordValueLabels;
 @property (nonatomic) double totalEarned;
 @property (nonatomic, strong) UIButton *sporeBtn;
+@property (nonatomic) NSTimeInterval sporeBoostEnd;
+@property (nonatomic) double sporeBoostMult;
 @property (nonatomic, strong) UIView *mutationCardView;
 @property (nonatomic, strong) UIView *mutationDimView;
 @property (nonatomic, strong) NSMutableArray<UIImpactFeedbackGenerator *> *haptics;
@@ -895,13 +897,19 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     return t;
 }
 
+- (double)sporeBoostMul {
+    if (self.sporeBoostEnd <= 0) return 1.0;
+    return ([[NSDate date] timeIntervalSince1970] < self.sporeBoostEnd) ? MAX(1.0, self.sporeBoostMult) : 1.0;
+}
+
 - (double)totalProd {
     double sum = 0;
     for (NSInteger i = 0; i <= self.stage && i < kStageCount; i++) {
         sum += _counts[i] * BaseProd(i) * MilestoneMult(_counts[i]);
     }
     return sum * [self geneMult] * [self boostMult] * [self mutProdMult] * [self difficultyProdMult]
-           * [self mutEvoWarmMult] * [self codexMult] * [self relicProdMult] * [self eventProdMult];
+           * [self mutEvoWarmMult] * [self codexMult] * [self relicProdMult] * [self eventProdMult]
+           * [self sporeBoostMul];
 }
 - (double)tapPower { return (0.1 + [self totalProd] * 0.05) * self.combo * [self mutTapMult] * [self geneTapMult] * [self relicTapMult]; }
 - (double)ascThreshold { return 2.0e7 * pow(5.0, (double)self.ascensions); }
@@ -2614,7 +2622,10 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     [self updateArtForStage:self.stage];
     [self updateMusicForEra:[self eraIndexForStage:self.stage]];
     // 顶部数字由 CADisplayLink 平滑驱动，这里不再直接赋值，避免跳动
-    self.autoLabel.text = [NSString stringWithFormat:@"💧 自动 +%@/秒", FmtNum([self totalProd])];
+    NSTimeInterval sporeLeft = self.sporeBoostEnd - [[NSDate date] timeIntervalSince1970];
+    self.autoLabel.text = (sporeLeft > 0)
+        ? [NSString stringWithFormat:@"💧 自动 +%@/秒   ✨×%.0f %lds", FmtNum([self totalProd]), self.sporeBoostMult, (long)ceil(sporeLeft)]
+        : [NSString stringWithFormat:@"💧 自动 +%@/秒", FmtNum([self totalProd])];
     self.rateLabel.text = [NSString stringWithFormat:@"👆 点击 %@/次    ⏳ 离线收益 %@",
                            FmtNum([self tapPower]),
                            ([self geneEffLevel:0] > 0)
@@ -3288,6 +3299,18 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
 
 - (void)handleEventsAndAchievements {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    if (self.sporeBoostEnd > 0) {
+        NSTimeInterval left = self.sporeBoostEnd - now;
+        if (left <= 0) {
+            self.sporeBoostEnd = 0;
+            self.sporeBoostMult = 1.0;
+            [self toast:@"✨ 孢子增益结束"];
+            [self refreshDynamic];
+        } else {
+            self.autoLabel.text = [NSString stringWithFormat:@"💧 自动 +%@/秒   ✨×%.0f %lds",
+                                   FmtNum([self totalProd]), self.sporeBoostMult, (long)ceil(left)];
+        }
+    }
 
     // 事件横幅：倒计时 + 进度条 + 环境粒子
     if (self.eventBannerVisible) {
@@ -3519,6 +3542,27 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
 
 // ================= 收益飘字 =================
 // 所有增加能量的来源统一走这里，前缀 + 颜色区分来源
+- (void)floatText:(NSString *)text color:(UIColor *)color at:(CGPoint)pt {
+    UILabel *lab = [[UILabel alloc] init];
+    lab.text = text;
+    lab.font = [UIFont boldSystemFontOfSize:26];
+    lab.textColor = color;
+    lab.layer.shadowColor = [UIColor blackColor].CGColor;
+    lab.layer.shadowOpacity = 0.6;
+    lab.layer.shadowRadius = 3;
+    lab.layer.shadowOffset = CGSizeZero;
+    [lab sizeToFit];
+    lab.center = pt;
+    lab.tag = 9901;
+    [self.view addSubview:lab];
+    lab.transform = CGAffineTransformMakeScale(1.5, 1.5);
+    [UIView animateWithDuration:0.16 animations:^{ lab.transform = CGAffineTransformIdentity; }];
+    [UIView animateWithDuration:0.95 delay:0.05 options:UIViewAnimationOptionCurveEaseOut animations:^{
+        lab.center = CGPointMake(lab.center.x, lab.center.y - 96);
+        lab.alpha = 0;
+    } completion:^(BOOL f) { [lab removeFromSuperview]; }];
+}
+
 - (void)floatGain:(double)value prefix:(NSString *)prefix color:(UIColor *)color size:(CGFloat)size at:(CGPoint)pt rise:(CGFloat)rise {
     UILabel *lab = [[UILabel alloc] init];
     lab.text = [NSString stringWithFormat:@"%@ +%@", prefix, FmtNum(value)];
@@ -3858,21 +3902,37 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
 
 - (void)onSpore {
     if (!self.sporeActive) return;
-    double reward = (MAX(50.0 * [self tapPower], 20.0 * [self totalProd]) + 10)
-                    * [self geneSporeMult] * [self relicSporeMult] * (1.0 + 0.8 * _muts[MutSpore]);
-    self.energy += reward;
-    self.runEarned += reward;
-    self.totalEarned += reward;
-    [self playSFX:@"spore"];
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     CGPoint spt = self.sporeBtn.center;
     UIColor *gold = [UIColor colorWithRed:1.0 green:0.78 blue:0.25 alpha:1];
-    [self rippleAt:spt color:gold radius:60];
-    [self sparkBurstAt:spt color:gold count:26 speed:230];
-    [self popCreature];
-    [self shakeScreen:4];
-    [self floatGain:reward prefix:@"✨" color:[UIColor colorWithRed:1.0 green:0.62 blue:0.16 alpha:1]
-                 size:22 at:self.sporeBtn.center rise:86];
-    [self toast:[NSString stringWithFormat:@"✨ 金色孢子 ⚡+%@", FmtNum(reward)]];
+    double amp = [self geneSporeMult] * [self relicSporeMult] * (1.0 + 0.8 * (double)_muts[MutSpore]);
+
+    // 三种孢子效果之一：短时小倍率 / 短时大倍率 / 直接跳过 8 分钟
+    NSInteger kind = (NSInteger)arc4random_uniform(3);
+    if (kind == 2) {
+        double reward = [self totalProd] * 480.0 * amp;
+        self.energy += reward;
+        self.runEarned += reward;
+        self.totalEarned += reward;
+        [self floatGain:reward prefix:@"⏩" color:[UIColor colorWithRed:1.0 green:0.72 blue:0.20 alpha:1]
+                     size:24 at:spt rise:90];
+        [self toast:[NSString stringWithFormat:@"⏩ 孢子·时间跃迁：直接获得 8 分钟产出 ⚡+%@", FmtNum(reward)]];
+    } else {
+        double base = (kind == 1) ? 6.0 : 2.0;
+        double dur  = (kind == 1) ? 10.0 : 20.0;
+        double mult = MIN(60.0, base * amp);
+        self.sporeBoostEnd = now + dur;
+        self.sporeBoostMult = mult;
+        [self flashScreen:gold alpha:(kind == 1 ? 0.42 : 0.24)];
+        [self shakeScreen:(kind == 1 ? 8 : 5)];
+        [self shockwaveAt:spt color:gold maxRadius:MIN(self.view.bounds.size.width, 420)];
+        [self sparkBurstAt:spt color:gold count:(kind == 1 ? 40 : 24) speed:260];
+        [self toast:[NSString stringWithFormat:@"✨ 孢子·%@：产出 ×%.0f，持续 %.0f 秒",
+                    (kind == 1 ? @"爆发" : @"涌动"), mult, dur]];
+        [self floatText:[NSString stringWithFormat:@"×%.0f", mult] color:gold at:spt];
+    }
+    [self playSFX:@"spore"];
+    self.sporeActive = NO;
     [self.sporeBtn removeFromSuperview];
     self.sporeActive = NO;
     [self refreshDynamic];

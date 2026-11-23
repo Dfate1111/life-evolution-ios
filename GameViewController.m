@@ -760,6 +760,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @property (nonatomic) NSInteger geneAscendLevel, geneStartLevel, geneSporeRateLevel, geneBossLevel;
 @property (nonatomic) NSInteger autoDiff;       // 自适应难度（飞升时按本轮进化速度固化）
 @property (nonatomic) NSInteger fastEvoCount;   // 本轮"进化过快"次数
+@property (nonatomic) NSInteger bossRushCount;    // 本轮"守关者被秒破"的累积惩罚（越高越难）
 @property (nonatomic) NSTimeInterval lastEvolveAt;
 @property (nonatomic) NSInteger geneQtyMode;      // 0=1级 1=10级 2=最大
 @property (nonatomic, strong) NSMutableArray<UIButton *> *geneQtyBtns;
@@ -994,7 +995,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 - (double)ascGeneTax { return MIN(60.0, pow(1.05, (double)[self totalGeneLevels])); }
 - (double)evoGeneTax { return MIN(25.0, pow(1.03, (double)[self totalGeneLevels])); }
 
-- (NSInteger)eventPressure { return MIN(8, self.autoDiff + MIN(3, self.fastEvoCount / 6)); }
+- (NSInteger)eventPressure { return MIN(8, self.autoDiff + MIN(3, self.fastEvoCount / 6) + MIN(3, self.bossRushCount / 4)); }
 // 自适应难度按当前压力实时生效（当轮进化过快也立刻变难），飞升后固化为新的基线
 - (double)autoProdMult { return pow(0.92, (double)[self eventPressure]); }
 - (double)autoCostMult { return pow(1.08, (double)[self eventPressure]); }
@@ -1059,6 +1060,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     self.geneSporeRateLevel = [d integerForKey:@"v3_gene_sporerate"];
     self.geneBossLevel = [d integerForKey:@"v3_gene_boss"];
     self.autoDiff = MIN(6, MAX(0, (NSInteger)[d integerForKey:@"v3_autodiff"]));
+    self.bossRushCount = MAX(0, MIN(40, (NSInteger)[d integerForKey:@"v3_bossrush"]));
     self.buyQtyMode = [d integerForKey:@"v3_qty"];
     self.maxStage = MAX([d integerForKey:@"v3_maxstage"], self.stage);
     self.relicPoints = [d integerForKey:@"v3_relicpts"];
@@ -1101,6 +1103,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     [d setInteger:self.geneSporeRateLevel forKey:@"v3_gene_sporerate"];
     [d setInteger:self.geneBossLevel forKey:@"v3_gene_boss"];
     [d setInteger:self.autoDiff forKey:@"v3_autodiff"];
+    [d setInteger:self.bossRushCount forKey:@"v3_bossrush"];
     [d setInteger:self.buyQtyMode forKey:@"v3_qty"];
     [d setInteger:self.maxStage forKey:@"v3_maxstage"];
     [d setInteger:self.relicPoints forKey:@"v3_relicpts"];
@@ -3054,7 +3057,8 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     double base = (0.1 + [self totalProd] * 0.05) * [self mutTapMult] * [self geneTapMult] * [self relicTapMult];
     NSInteger gateIdx = MAX(0, (t / 6) - 1);
     // 进化过快带来的压力同样抬高守关者强度（最多 +120% 血量）
-    double bossStrength = 1.0 + 0.35 * (double)[self eventPressure];
+    double bossStrength = (1.0 + 0.35 * (double)[self eventPressure])
+                        * (1.0 + 0.05 * (double)MIN(20, self.bossRushCount));
     double needHits = (220.0 + 80.0 * (double)gateIdx) * bossStrength;
     self.bossMaxHP = MAX(1.0, needHits * base);
     self.bossHP = self.bossMaxHP;
@@ -3124,11 +3128,21 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
         _bossDoneRound[t] = YES;
         _bossFails[t] = 0;
         NSInteger reward = 5 + (t / 6) * 4;
+        double used = 40.0 - MAX(0.0, self.bossEnd - [[NSDate date] timeIntervalSince1970]);
+        NSInteger rushAdd = used < 10.0 ? 4 : (used < 16.0 ? 2 : (used < 24.0 ? 1 : -1));
+        self.bossRushCount = MAX(0, MIN(40, self.bossRushCount + rushAdd));
+        if (rushAdd >= 2) reward = MAX(2, reward / 2);   // 秒破不给满额 DNA
         self.dna += reward;
         [self flashScreen:[UIColor colorWithRed:1 green:0.85 blue:0.4 alpha:1] alpha:0.5];
         [self shakeScreen:10];
         [self sparkBurstAt:[self creatureCenterInView] color:[UIColor colorWithRed:1 green:0.8 blue:0.3 alpha:1] count:40 speed:300];
-        [self toast:[NSString stringWithFormat:@"⚔️ 守关者被击破！+%ld 🧬", (long)reward]];
+        if (rushAdd >= 2) {
+            [self flashScreen:[UIColor redColor] alpha:0.30];
+            [self shakeScreen:8];
+            [self toast:[NSString stringWithFormat:@"⚔️ %.1fs 击破 +%ld 🧬（减半）· ⚠️ 反噬 压力 %ld", used, (long)reward, (long)[self eventPressure]]];
+        } else {
+            [self toast:[NSString stringWithFormat:@"⚔️ 守关者被击破！+%ld 🧬", (long)reward]];
+        }
         [self saveState];
         [self refreshAll];
     } else {
@@ -4362,8 +4376,9 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         self.combo = 1.0;
         for (NSInteger i = 0; i < 64; i++) { _bossFails[i] = 0; _bossDoneRound[i] = NO; }
         // 按本轮实际进化速度固化自适应难度（快则加难，慢则回落）
-        self.autoDiff = MIN(6, self.fastEvoCount / 3);   // 3 点过快 ≈ 1 级难度
+        self.autoDiff = MIN(6, (self.fastEvoCount + self.bossRushCount * 2) / 3);   // 进化过快 + 秒破守关者都折算进下一轮基线
         self.fastEvoCount = 0;
+        self.bossRushCount = 0;
         self.lastEvolveAt = 0;
         NSInteger startLv = [self geneStartLineLevel];
         for (NSInteger i = 0; i < kStageCount; i++) _counts[i] = startLv;

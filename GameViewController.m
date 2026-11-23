@@ -654,6 +654,8 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @property (nonatomic) BOOL eventBannerVisible;
 @property (nonatomic) NSTimeInterval eventBannerHideAt, eventBannerShownAt;
 @property (nonatomic) NSInteger eventFXTick;
+@property (nonatomic, strong) UIButton *eventCleanseBtn;
+@property (nonatomic) double cleanseCost;
 @property (nonatomic) NSTimeInterval eventEnd;
 @property (nonatomic) NSTimeInterval nextEventAt;
 @property (nonatomic, strong) UIView *codexPage, *relicPage;
@@ -3044,6 +3046,23 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     self.eventBannerFill.backgroundColor = [UIColor whiteColor];
     [fillBg addSubview:self.eventBannerFill];
     [self.view bringSubviewToFront:b];
+
+    // 负面事件的“解除”按钮：贴在底部标签栏上方
+    CGFloat H = self.view.bounds.size.height;
+    UIButton *cb = [UIButton buttonWithType:UIButtonTypeCustom];
+    cb.frame = CGRectMake(16, H - 84 - 58, W - 32, 46);
+    cb.backgroundColor = [UIColor colorWithRed:0.58 green:0.13 blue:0.18 alpha:0.94];
+    cb.layer.cornerRadius = 23;
+    cb.layer.borderWidth = 1.5;
+    cb.layer.borderColor = [[UIColor colorWithRed:1 green:0.45 blue:0.40 alpha:0.85] CGColor];
+    cb.titleLabel.font = [UIFont boldSystemFontOfSize:14];
+    cb.titleLabel.adjustsFontSizeToFitWidth = YES;
+    cb.titleLabel.minimumScaleFactor = 0.7;
+    [cb setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    [cb addTarget:self action:@selector(onCleanseEvent) forControlEvents:UIControlEventTouchUpInside];
+    cb.hidden = YES;
+    [self.view addSubview:cb];
+    self.eventCleanseBtn = cb;
 }
 
 - (void)showEventBannerForKind:(NSInteger)k duration:(double)d gain:(double)gain {
@@ -3078,6 +3097,47 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     glow.duration = 0.9; glow.autoreverses = YES; glow.repeatCount = 8;
     [self.eventBanner.layer addAnimation:glow forKey:@"eventGlow"];
     [self.view bringSubviewToFront:self.eventBanner];
+    [self updateCleanseButton];
+}
+
+- (void)updateCleanseButton {
+    if (self.eventCleanseBtn == nil) return;
+    BOOL negative = (self.eventKind == 1 || self.eventKind == 4);
+    if (!negative) {
+        self.eventCleanseBtn.hidden = YES;
+        return;
+    }
+    double cost = MAX(10.0, [self totalProd] * 20.0);
+    self.cleanseCost = cost;
+    BOOL enough = (self.energy >= cost);
+    self.eventCleanseBtn.hidden = NO;
+    self.eventCleanseBtn.enabled = enough;
+    self.eventCleanseBtn.alpha = enough ? 1.0 : 0.55;
+    NSString *name = [self eventNamePlain:self.eventKind];
+    NSString *title = enough
+        ? [NSString stringWithFormat:@"🛡 消耗 ⚡%@ 解除「%@」", FmtNum(cost), name]
+        : [NSString stringWithFormat:@"能量不足 · 还需 ⚡%@ 才能解除「%@」", FmtNum(cost - self.energy), name];
+    [self.eventCleanseBtn setTitle:title forState:UIControlStateNormal];
+    [self.view bringSubviewToFront:self.eventCleanseBtn];
+}
+
+- (void)onCleanseEvent {
+    if (!(self.eventKind == 1 || self.eventKind == 4)) return;
+    if (self.energy < self.cleanseCost) {
+        [self toast:[NSString stringWithFormat:@"能量不足（需要 ⚡%@）", FmtNum(self.cleanseCost)]];
+        return;
+    }
+    NSString *name = [self eventNamePlain:self.eventKind];
+    self.energy = MAX(0.0, self.energy - self.cleanseCost);
+    self.eventKind = 0;
+    self.eventEnd = 0;
+    [self hideEventBanner];
+    self.eventCleanseBtn.hidden = YES;
+    [self playSFX:@"spore"];
+    [self flashScreen:[UIColor colorWithRed:0.55 green:0.95 blue:0.85 alpha:1] alpha:0.30];
+    [self toast:[NSString stringWithFormat:@"🛡 已解除「%@」", name]];
+    [self refreshDynamic];
+    [self saveState];
 }
 
 - (void)hideEventBanner {
@@ -3100,31 +3160,16 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     CGPoint ctr = CGPointMake(W / 2, H * 0.34);
     UIColor *c = EventColor(k);
 
-    // 全屏闪光 + 震屏，每种事件不同强度
-    CGFloat alpha = (k == 3) ? 0.62 : (k == 1 ? 0.26 : 0.22);
-    [self flashScreen:c alpha:alpha];
-    [self shakeScreen:(k == 3 ? 11 : (k == 1 ? 8 : 6))];
+    // 全屏闪光 + 震屏：陨石的冲击放在落地那一刻，避免提前闪
+    if (k != 1) {
+        CGFloat alpha = (k == 3) ? 0.62 : 0.22;
+        [self flashScreen:c alpha:alpha];
+        [self shakeScreen:(k == 3 ? 11 : 6)];
+    }
 
     if (k == 1) {
-        // 陨石：多条斜向拖尾光点
-        for (NSInteger i = 0; i < 9; i++) {
-            UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 9, 9)];
-            dot.backgroundColor = c;
-            dot.layer.cornerRadius = 4.5;
-            dot.layer.shadowColor = [c CGColor];
-            dot.layer.shadowOpacity = 0.9;
-            dot.layer.shadowRadius = 7;
-            dot.center = CGPointMake(W + 40 - i * 22, -30 - i * 34);
-            [self.view addSubview:dot];
-            CGPoint end = CGPointMake(-40 + i * 52, H * 0.78 + i * 26);
-            [UIView animateWithDuration:0.85 delay:i * 0.11
-                                options:UIViewAnimationOptionCurveEaseIn animations:^{
-                dot.center = end;
-                dot.alpha = 0;
-            } completion:^(BOOL f) { [dot removeFromSuperview]; }];
-        }
-        [self sparkBurstAt:ctr color:c count:26 speed:240];
-        [self shockwaveAt:ctr color:c maxRadius:MIN(W, 420)];
+        // 陨石：一整块巨岩砸穿屏幕
+        [self meteorStrikeFX];
     } else if (k == 2) {
         // 寒武爆发：多层绿色扩张波 + 粒子雨
         [self shockwaveAt:ctr color:c maxRadius:MIN(W, 460)];
@@ -3158,6 +3203,84 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         [self shockwaveAt:CGPointMake(W / 2, H * 0.5) color:c maxRadius:MIN(W, 380)];
         [self sparkBurstAt:ctr color:c count:16 speed:120];
     }
+}
+
+- (void)meteorStrikeFX {
+    CGFloat W = self.view.bounds.size.width, H = self.view.bounds.size.height;
+    CGFloat size = MIN(W * 0.68, 310);
+    CGPoint hit = CGPointMake(W * 0.50, H * 0.29);
+
+    // 陨石本体：深棕岩块 + 炽热边缘
+    UIView *rock = [[UIView alloc] initWithFrame:CGRectMake(W * 0.95, -size * 1.6, size, size)];
+    rock.backgroundColor = [UIColor colorWithRed:0.30 green:0.14 blue:0.07 alpha:1];
+    rock.layer.cornerRadius = size / 2;
+    rock.layer.shadowColor = [[UIColor colorWithRed:1.0 green:0.45 blue:0.12 alpha:1] CGColor];
+    rock.layer.shadowOpacity = 1.0;
+    rock.layer.shadowRadius = 46;
+    rock.layer.shadowOffset = CGSizeZero;
+    rock.clipsToBounds = NO;
+    rock.userInteractionEnabled = NO;
+    [self.view addSubview:rock];
+
+    // 表面坑洞
+    for (NSInteger i = 0; i < 6; i++) {
+        CGFloat d = size * (0.08 + 0.10 * (i % 3));
+        UIView *pit = [[UIView alloc] initWithFrame:CGRectMake(0, 0, d, d)];
+        pit.backgroundColor = [UIColor colorWithWhite:0.10 alpha:0.55];
+        pit.layer.cornerRadius = d / 2;
+        pit.center = CGPointMake(size * (0.20 + 0.13 * i), size * (0.28 + 0.09 * (i % 4)));
+        [rock addSubview:pit];
+    }
+
+    // 火焰拖尾
+    UIView *tail = [[UIView alloc] initWithFrame:CGRectMake(size * 0.5, size * 0.12, size * 1.9, size * 0.42)];
+    CAGradientLayer *tg = [CAGradientLayer layer];
+    tg.frame = tail.bounds;
+    tg.startPoint = CGPointMake(0, 0.5);
+    tg.endPoint = CGPointMake(1, 0.5);
+    tg.colors = @[(id)[[UIColor colorWithRed:1.0 green:0.85 blue:0.35 alpha:0.95] CGColor],
+                  (id)[[UIColor colorWithRed:1.0 green:0.35 blue:0.08 alpha:0.55] CGColor],
+                  (id)[[UIColor colorWithRed:1.0 green:0.2 blue:0.05 alpha:0.0] CGColor]];
+    tg.locations = @[@0.0, @0.35, @1.0];
+    [tail.layer addSublayer:tg];
+    tail.transform = CGAffineTransformMakeRotation(M_PI * 0.25);
+    tail.userInteractionEnabled = NO;
+    [rock addSubview:tail];
+
+    // 砸落
+    [UIView animateWithDuration:0.60 delay:0 options:UIViewAnimationOptionCurveEaseIn animations:^{
+        rock.center = hit;
+        rock.transform = CGAffineTransformMakeRotation(M_PI * 0.10);
+    } completion:^(BOOL f) {
+        [self meteorImpactAt:hit];
+        [UIView animateWithDuration:0.24 animations:^{
+            rock.transform = CGAffineTransformMakeScale(1.45, 1.45);
+            rock.alpha = 0;
+        } completion:^(BOOL f2) { [rock removeFromSuperview]; }];
+    }];
+}
+
+- (void)meteorImpactAt:(CGPoint)hit {
+    CGFloat W = self.view.bounds.size.width;
+    UIColor *fire = [UIColor colorWithRed:1.0 green:0.45 blue:0.12 alpha:1];
+
+    [self flashScreen:fire alpha:0.92];
+    [self shakeScreen:17];
+    [self vibrateHeavy];
+    [self shockwaveAt:hit color:fire maxRadius:MIN(W, 620)];
+    [self sparkBurstAt:hit color:fire count:80 speed:470];
+    [self sparkBurstAt:hit color:[UIColor colorWithRed:1 green:0.88 blue:0.45 alpha:1] count:34 speed:300];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self shockwaveAt:hit color:[UIColor whiteColor] maxRadius:MIN(W, 430)];
+        [self shakeScreen:12];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.26 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self shakeScreen:8];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.44 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self shakeScreen:5];
+    });
 }
 
 - (void)eventAmbientPulse {
@@ -3216,6 +3339,9 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     if (self.eventKind > 0) {
         self.eventFXTick += 1;
         if (self.eventFXTick % 2 == 0) [self eventAmbientPulse];
+        [self updateCleanseButton];
+    } else if (self.eventCleanseBtn != nil) {
+        self.eventCleanseBtn.hidden = YES;
     }
 
     if (self.eventKind > 0 && now >= self.eventEnd) {

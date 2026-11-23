@@ -916,6 +916,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     if (self.eventKind == 1) return MAX(0.12, 0.50 - 0.06 * (double)p);   // 陨石
     if (self.eventKind == 2) return 2.0;                                 // 寒武
     if (self.eventKind == 5) return MAX(0.10, 0.45 - 0.06 * (double)p);   // 日冕风暴
+    if (self.eventKind == 7) return MAX(0.20, 0.40 - 0.05 * (double)p);   // 虚空抽取
     return 1.0;
 }
 - (double)eventCostMult {
@@ -965,12 +966,13 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 - (double)ascGeneTax { return MIN(60.0, pow(1.05, (double)[self totalGeneLevels])); }
 - (double)evoGeneTax { return MIN(25.0, pow(1.03, (double)[self totalGeneLevels])); }
 
-- (NSInteger)eventPressure { return MIN(6, self.autoDiff + MIN(2, self.fastEvoCount / 6)); }
-- (double)autoProdMult { return pow(0.90, (double)self.autoDiff); }
-- (double)autoCostMult { return pow(1.12, (double)self.autoDiff); }
-- (double)autoEvoMult  { return pow(1.15, (double)self.autoDiff); }
-- (double)autoAscMult  { return pow(1.22, (double)self.autoDiff); }
-- (double)autoDNAMult  { return pow(0.82, (double)self.autoDiff); }
+- (NSInteger)eventPressure { return MIN(8, self.autoDiff + MIN(3, self.fastEvoCount / 6)); }
+// 自适应难度按指数抬升：一次“极快进化”就能明显改变强度
+- (double)autoProdMult { return pow(0.72, (double)self.autoDiff); }
+- (double)autoCostMult { return pow(1.35, (double)self.autoDiff); }
+- (double)autoEvoMult  { return pow(1.45, (double)self.autoDiff); }
+- (double)autoAscMult  { return pow(1.50, (double)self.autoDiff); }
+- (double)autoDNAMult  { return pow(0.70, (double)self.autoDiff); }
 
 - (double)ascThreshold {
     // 首次 2e7；之后每次按 20 倍递增：4e8 / 8e9 / 1.6e11 …，再叠加基因税
@@ -3019,7 +3021,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     double base = (0.1 + [self totalProd] * 0.05) * [self mutTapMult] * [self geneTapMult] * [self relicTapMult];
     NSInteger gateIdx = MAX(0, (t / 6) - 1);
     // 进化过快带来的压力同样抬高守关者强度（最多 +120% 血量）
-    double bossStrength = 1.0 + 0.20 * (double)[self eventPressure];
+    double bossStrength = 1.0 + 0.35 * (double)[self eventPressure];
     double needHits = (220.0 + 80.0 * (double)gateIdx) * bossStrength;
     self.bossMaxHP = MAX(1.0, needHits * base);
     self.bossHP = self.bossMaxHP;
@@ -3113,6 +3115,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
         case 4: return @"熵坍缩";
         case 5: return @"日冕风暴";
         case 6: return @"基因崩解";
+        case 7: return @"虚空抽取";
         default: return @"";
     }
 }
@@ -3125,6 +3128,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
         case 4: return @"🕳 熵坍缩";
         case 5: return @"🌞 日冕风暴";
         case 6: return @"🧬 基因崩解";
+        case 7: return @"🕳 虚空抽取";
         default: return @"";
     }
 }
@@ -3136,6 +3140,7 @@ static UIColor *EventColor(NSInteger k) {
         case 3: return [UIColor colorWithRed:1.00 green:0.86 blue:0.40 alpha:1];
         case 5: return [UIColor colorWithRed:1.00 green:0.70 blue:0.25 alpha:1];
         case 6: return [UIColor colorWithRed:0.85 green:0.28 blue:0.72 alpha:1];
+        case 7: return [UIColor colorWithRed:0.35 green:0.45 blue:1.00 alpha:1];
         default: return [UIColor colorWithRed:0.72 green:0.42 blue:1.00 alpha:1];
     }
 }
@@ -3147,6 +3152,7 @@ static NSString *EventIcon(NSInteger k) {
         case 3: return @"💥";
         case 5: return @"🌞";
         case 6: return @"🧬";
+        case 7: return @"🕳";
         default: return @"🌀";
     }
 }
@@ -3158,6 +3164,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         case 3: return [NSString stringWithFormat:@"瞬间 +%@ 能量", FmtNum(gain)];
         case 5: return [NSString stringWithFormat:@"产出大幅萎缩 · 持续 %.0f 秒", d];
         case 6: return [NSString stringWithFormat:@"所有成本大幅上涨 · 持续 %.0f 秒", d];
+        case 7: return [NSString stringWithFormat:@"立刻抽走一大笔能量 · 产出萎缩 %.0f 秒", d];
         default: return [NSString stringWithFormat:@"成本 +35%% · 持续 %.0f 秒", d];
     }
 }
@@ -3272,7 +3279,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
 
 - (void)updateCleanseButton {
     if (self.eventCleanseBtn == nil) return;
-    BOOL negative = (self.eventKind == 1 || self.eventKind == 4 || self.eventKind == 5 || self.eventKind == 6);
+    BOOL negative = (self.eventKind == 1 || self.eventKind == 4 || self.eventKind == 5 || self.eventKind == 6 || self.eventKind == 7);
     if (!negative) {
         self.eventCleanseBtn.hidden = YES;
         return;
@@ -3292,7 +3299,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
 }
 
 - (void)onCleanseEvent {
-    if (!(self.eventKind == 1 || self.eventKind == 4 || self.eventKind == 5 || self.eventKind == 6)) return;
+    if (!(self.eventKind == 1 || self.eventKind == 4 || self.eventKind == 5 || self.eventKind == 6 || self.eventKind == 7)) return;
     if (self.energy < self.cleanseCost) {
         [self toast:[NSString stringWithFormat:@"能量不足（需要 ⚡%@）", FmtNum(self.cleanseCost)]];
         return;
@@ -3381,6 +3388,17 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
             CGPoint q = CGPointMake(W * 0.15 + arc4random_uniform((uint32_t)(W * 0.7)), H * 0.2 + arc4random_uniform((uint32_t)(H * 0.5)));
             [self sparkBurstAt:q color:c count:14 speed:200];
         }
+    } else if (k == 7) {
+        // 虚空抽取：向内收缩的蓝色漩涡 + 碎光
+        [self shockwaveAt:ctr color:c maxRadius:MIN(W, 460)];
+        for (NSInteger i = 0; i < 14; i++) {
+            CGFloat ang = (M_PI * 2 * i) / 14.0;
+            CGPoint q = CGPointMake(ctr.x + cos(ang) * 160, ctr.y + sin(ang) * 160);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((0.05 * i) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self sparkBurstAt:q color:c count:6 speed:110];
+            });
+        }
+        [self sparkBurstAt:ctr color:[UIColor colorWithWhite:0.7 alpha:1] count:20 speed:90];
     } else if (k == 6) {
         // 基因崩解：紫色螺旋碎块 + 画面抖动
         [self shockwaveAt:ctr color:c maxRadius:MIN(W, 400)];
@@ -3496,11 +3514,11 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
     NSInteger p = [self eventPressure];
     // 压力越高，负面灾害占比越高（0 压力约 42%，满压力约 84%），种类在 4 种负面里随机
-    double negChance = MIN(0.84, 0.42 + 0.07 * (double)p);
+    double negChance = MIN(0.92, 0.42 + 0.07 * (double)p);
     NSInteger k;
     if ((double)arc4random_uniform(1000) / 1000.0 < negChance) {
-        NSArray *negKinds = @[@1, @4, @5, @6];
-        k = [negKinds[arc4random_uniform(4)] integerValue];
+        NSArray *negKinds = @[@1, @4, @5, @6, @7];
+        k = [negKinds[arc4random_uniform(5)] integerValue];
     } else {
         k = (arc4random_uniform(10) < 3) ? 2 : 3;   // 寒武 / 超新星
     }
@@ -3517,18 +3535,33 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         [self playSFX:@"event"];
         [self eventFXForKind:3];
         [self showEventBannerForKind:3 duration:5.0 gain:gain];
-        self.nextEventAt = now + MAX(45.0, 130.0 - 12.0 * (double)p);
+        self.nextEventAt = now + MAX(28.0, 130.0 - 16.0 * (double)p);
         return;
     }
     double d = (k == 1) ? 25.0 : (k == 2) ? 18.0 : (k == 5 ? 22.0 : 20.0);
     d = d * (1.0 + 0.05 * (double)p) * [self relicEventMult];
     self.eventKind = k;
     self.eventEnd = now + d;
-    self.nextEventAt = now + MAX(48.0, 150.0 - 15.0 * (double)p);
+    double drained = 0.0;
+    if (k == 7) {
+        double ratio = MIN(0.75, 0.35 + 0.06 * (double)p);
+        drained = self.energy * ratio;
+        self.energy = MAX(0.0, self.energy - drained);
+        [self floatText:[NSString stringWithFormat:@"🕳 −%@", FmtNum(drained)]
+                  color:[UIColor colorWithRed:0.55 green:0.62 blue:1 alpha:1]
+                     at:[self creatureCenterInView]];
+        [self shakeScreen:12];
+        [self vibrateHeavy];
+    }
+    self.nextEventAt = now + MAX(25.0, 150.0 - 18.0 * (double)p);
     [self playSFX:@"event"];
     [self eventFXForKind:k];
     [self showEventBannerForKind:k duration:d gain:0];
-    [self toast:[NSString stringWithFormat:@"%@ 降临（%.0f 秒）", [self eventTitle:k], d]];
+    if (k == 7) {
+        [self toast:[NSString stringWithFormat:@"%@ 降临：能量 −%@（%.0f 秒）", [self eventTitle:k], FmtNum(drained), d]];
+    } else {
+        [self toast:[NSString stringWithFormat:@"%@ 降临（%.0f 秒）", [self eventTitle:k], d]];
+    }
     [self refreshDynamic];
 }
 
@@ -4015,8 +4048,20 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     if (self.stage > self.maxStage) self.maxStage = self.stage;
     {
         NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-        if (self.lastEvolveAt > 0 && (now - self.lastEvolveAt) < 22.0 && self.stage >= 8)
-            self.fastEvoCount = MIN(60, self.fastEvoCount + 1);
+        double gap = (self.lastEvolveAt > 0) ? (now - self.lastEvolveAt) : 999.0;
+        if (self.lastEvolveAt > 0 && self.stage >= 6) {
+            // 间隔越短，惩罚权重越高：<8s 记 4 点，<15s 记 2 点，<22s 记 1 点，正常间隔反向回落
+            if (gap < 8.0)       { self.fastEvoCount = MIN(80, self.fastEvoCount + 4); }
+            else if (gap < 15.0) { self.fastEvoCount = MIN(80, self.fastEvoCount + 2); }
+            else if (gap < 22.0) { self.fastEvoCount = MIN(80, self.fastEvoCount + 1); }
+            else                 { self.fastEvoCount = MAX(0, self.fastEvoCount - 1); }
+            if (gap < 8.0) {
+                [self toast:[NSString stringWithFormat:@"⚠️ 进化只用了 %.0f 秒 · 世界反噬加剧（压力 %ld）",
+                            gap, (long)[self eventPressure]]];
+                [self flashScreen:[UIColor colorWithRed:1 green:0.3 blue:0.2 alpha:1] alpha:0.18];
+                [self shakeScreen:4];
+            }
+        }
         self.lastEvolveAt = now;
     }
     if (_muts[MutEvoWarm] > 0) self.evoWarmUntil = [[NSDate date] timeIntervalSince1970] + 15.0;
@@ -4264,7 +4309,8 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     double nextProd = MAX(0.25, pow(0.85, (double)(self.ascensions + 1)));
     double nextCost = pow(1.22, (double)(self.ascensions + 1));
     NSInteger nextAuto = MIN(6, self.fastEvoCount / 3);
-    NSString *msg = [NSString stringWithFormat:@"本轮生命将归于起源，获得 %@ 🧬DNA 与 🔮 遗物点 +2。\nDNA 永久保留；能量、物种、变异路线将重置。\n\n⚠️ 下一轮难度提升：产出效率 ×%.2f、购买成本 ×%.2f、进化费用 ×%.2f。\n🎚 自适应难度：本轮进化过快 %ld 次 → 下一轮产出 ×%.2f、成本 ×%.2f、守关者血量 ×%.2f。", FmtInt(gain), nextProd, nextCost, pow(1.30, (double)(self.ascensions + 1)), (long)self.fastEvoCount, pow(0.90, (double)nextAuto), pow(1.12, (double)nextAuto), pow(1.20, (double)nextAuto)];
+    NSString *msg = [NSString stringWithFormat:@"本轮生命将归于起源，获得 %@ 🧬DNA 与 🔮 遗物点 +2。\nDNA 永久保留；能量、物种、变异路线将重置。\n\n⚠️ 下一轮难度提升：产出效率 ×%.2f、购买成本 ×%.2f、进化费用 ×%.2f。\n🎚 自适应难度：本轮进化过快 %ld 次 → 下一轮产出 ×%.2f、成本 ×%.2f、进化费 ×%.2f、飞升门槛 ×%.2f、守关血量 ×%.2f、DNA ×%.2f。", FmtInt(gain), nextProd, nextCost, pow(1.30, (double)(self.ascensions + 1)), (long)self.fastEvoCount, pow(0.72, (double)nextAuto), pow(1.35, (double)nextAuto),
+               pow(1.45, (double)nextAuto), pow(1.50, (double)nextAuto), pow(1.35, (double)nextAuto), pow(0.70, (double)nextAuto)];
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"🕊 飞升" message:msg preferredStyle:UIAlertControllerStyleAlert];
     [ac addAction:[UIAlertAction actionWithTitle:@"再想想" style:UIAlertActionStyleCancel handler:nil]];
     [ac addAction:[UIAlertAction actionWithTitle:@"飞升！" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
@@ -4278,7 +4324,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         self.combo = 1.0;
         for (NSInteger i = 0; i < 64; i++) _bossFails[i] = 0;
         // 按本轮实际进化速度固化自适应难度（快则加难，慢则回落）
-        self.autoDiff = MIN(6, self.fastEvoCount / 3);
+        self.autoDiff = MIN(6, self.fastEvoCount / 3);   // 3 点过快 ≈ 1 级难度
         self.fastEvoCount = 0;
         self.lastEvolveAt = 0;
         NSInteger startLv = [self geneStartLineLevel];

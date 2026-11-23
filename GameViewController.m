@@ -213,7 +213,7 @@ static const Mutation kMuts[] = {
 // 基因组强化条目
 typedef struct { const char *icon; const char *name; const char *desc; } GeneDef;
 static const GeneDef kGenes[] = {
-    {"⏳", "离线收益",   "离开时返还 50% 产出，最多 8 小时"},
+    {"⏳", "离线收益",   "离开时返还产出（每级 +10%，最高 100%，上限每级 +1 小时）"},
     {"🧬", "基因强化",   "全产出 +50%／级"},
     {"👆", "点击强化",   "点击收益 +30%／级"},
     {"✨", "孢子亲和",   "金色孢子收益 +40%／级"},
@@ -225,7 +225,7 @@ static const GeneDef kGenes[] = {
 static const NSInteger kGeneCount = sizeof(kGenes) / sizeof(kGenes[0]);
 
 // 单条基因等级上限，避免 DNA 无限灌入导致数值爆炸
-static const NSInteger kGeneMaxLevel = 100;
+static const NSInteger kGeneMaxLevel = 999999;   // 强化不再有等级上限
 
 // 与阶段主题色高对比的飘字颜色（备用，当前配色改为按来源固定）
 static UIColor *ContrastColorForStage(NSInteger i) __attribute__((unused));
@@ -648,6 +648,12 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @property (nonatomic) NSInteger relicPoints;   // 遗物点
 @property (nonatomic) NSInteger totalTaps;     // 累计点击
 @property (nonatomic) NSInteger eventKind;     // 0 无 1 陨石 2 爆发 3 超新星 4 熵坍缩
+@property (nonatomic, strong) UIView *eventBanner;
+@property (nonatomic, strong) UILabel *eventBannerIcon, *eventBannerTitle, *eventBannerSub, *eventBannerTime;
+@property (nonatomic, strong) UIView *eventBannerFill;
+@property (nonatomic) BOOL eventBannerVisible;
+@property (nonatomic) NSTimeInterval eventBannerHideAt, eventBannerShownAt;
+@property (nonatomic) NSInteger eventFXTick;
 @property (nonatomic) NSTimeInterval eventEnd;
 @property (nonatomic) NSTimeInterval nextEventAt;
 @property (nonatomic, strong) UIView *codexPage, *relicPage;
@@ -713,7 +719,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @property (nonatomic, strong) NSMutableArray<UILabel *> *geneNameLabels;
 @property (nonatomic, strong) NSMutableArray<RollLabel *> *genePriceRolls;
 @property (nonatomic, strong) NSMutableArray<RollLabel *> *geneSubRolls;
-@property (nonatomic) NSInteger geneTapLevel, geneSporeLevel, geneAutoLevel;
+@property (nonatomic) NSInteger geneTapLevel, geneSporeLevel, geneAutoLevel, geneOfflineLevel;
 @property (nonatomic) NSInteger geneAscendLevel, geneStartLevel, geneSporeRateLevel;
 @property (nonatomic) NSInteger geneQtyMode;      // 0=1级 1=10级 2=最大
 @property (nonatomic, strong) NSMutableArray<UIButton *> *geneQtyBtns;
@@ -850,10 +856,10 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 - (double)geneTapMult    { return 1.0 + 0.30 * (double)[self geneEffLevel:2]; }
 - (double)geneSporeMult  { return 1.0 + 0.40 * (double)[self geneEffLevel:3]; }
 - (double)geneAscendMult { return 1.0 + 0.20 * (double)[self geneEffLevel:5]; }
-- (double)geneSporeRateMult { return MAX(0.4, 1.0 - 0.10 * (double)[self geneEffLevel:7]); }
+- (double)geneSporeRateMult { return MAX(0.10, 1.0 - 0.10 * (double)[self geneEffLevel:7]); }
 
 // 起始遗泽：每条产线起始等级（每 2 级 +1，最多 60 级）
-- (NSInteger)geneStartLineLevel { return MIN((NSInteger)85, [self geneEffLevel:6] / 2 + (_relics[4] ? 5 : 0)); }
+- (NSInteger)geneStartLineLevel { return MIN((NSInteger)300, [self geneEffLevel:6] / 2 + (_relics[4] ? 5 : 0)); }
 
 // ---- 图鉴 / 遗物 / 时代事件 带来的全局加成 ----
 - (NSInteger)codexUnlocked { return MIN(self.maxStage + 1, kStageCount); }
@@ -934,6 +940,8 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     self.dna = [d integerForKey:@"v3_dna"];
     self.ascensions = [d integerForKey:@"v3_asc"];
     self.offlineUnlocked = [d boolForKey:@"v3_offline"];
+    self.geneOfflineLevel = [d integerForKey:@"v3_gene_offline_lv"];
+    if (self.offlineUnlocked && self.geneOfflineLevel <= 0) self.geneOfflineLevel = 1;
     self.geneLevel = [d integerForKey:@"v3_gene"];
     self.geneTapLevel = [d integerForKey:@"v3_gene_tap"];
     self.geneSporeLevel = [d integerForKey:@"v3_gene_spore"];
@@ -969,6 +977,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     [d setInteger:self.dna forKey:@"v3_dna"];
     [d setInteger:self.ascensions forKey:@"v3_asc"];
     [d setBool:self.offlineUnlocked forKey:@"v3_offline"];
+    [d setInteger:self.geneOfflineLevel forKey:@"v3_gene_offline_lv"];
     [d setInteger:self.geneLevel forKey:@"v3_gene"];
     [d setInteger:self.geneTapLevel forKey:@"v3_gene_tap"];
     [d setInteger:self.geneSporeLevel forKey:@"v3_gene_spore"];
@@ -990,14 +999,17 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     [d synchronize];
 }
 
+- (double)offlineReturnRate { return MIN(1.0, 0.5 + 0.10 * (double)[self geneEffLevel:0]); }
+- (double)offlineCapHours   { return MIN(24.0, 8.0 + (double)[self geneEffLevel:0]); }
+
 - (void)applyOffline {
-    if (!self.offlineUnlocked) return;
+    if (!self.offlineUnlocked || [self geneEffLevel:0] <= 0) return;
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     double last = [d doubleForKey:@"v3_lastSeen"];
     if (last <= 0) return;
-    double elapsed = MIN([[NSDate date] timeIntervalSince1970] - last, 8 * 3600.0);
+    double elapsed = MIN([[NSDate date] timeIntervalSince1970] - last, [self offlineCapHours] * 3600.0);
     if (elapsed < 15) return;
-    double gain = [self totalProd] * elapsed * 0.5;
+    double gain = [self totalProd] * elapsed * [self offlineReturnRate];
     if (gain >= 1) {
         self.energy += gain;
         self.runEarned += gain;
@@ -1295,6 +1307,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 
     [self buildTabBar];
     [self buildPanels];
+    [self buildEventBanner];
     [self selectTab:0];
 }
 
@@ -1432,11 +1445,24 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 
     // ---- 基因组 ----
     self.genePage = [self makePageWithTitle:@"基因组" subtitle:@"用 DNA 解锁永久强化 · 飞升后保留"];
-    self.geneDnaLabel = [[UILabel alloc] initWithFrame:CGRectMake(W - 150, 60, 132, 22)];
+    UIView *dnaPill = [[UIView alloc] initWithFrame:CGRectMake(W - 138, 52, 120, 40)];
+    dnaPill.backgroundColor = [UIColor colorWithRed:0.30 green:0.16 blue:0.50 alpha:0.55];
+    dnaPill.layer.cornerRadius = 20;
+    dnaPill.layer.borderWidth = 1;
+    dnaPill.layer.borderColor = [[UIColor colorWithRed:0.72 green:0.55 blue:1 alpha:0.8] CGColor];
+    [self.genePage addSubview:dnaPill];
+
+    UILabel *dnaCap = [[UILabel alloc] initWithFrame:CGRectMake(14, 0, 44, 40)];
+    dnaCap.text = @"可用";
+    dnaCap.font = [UIFont systemFontOfSize:10];
+    dnaCap.textColor = [UIColor colorWithWhite:1 alpha:0.55];
+    [dnaPill addSubview:dnaCap];
+
+    self.geneDnaLabel = [[UILabel alloc] initWithFrame:CGRectMake(50, 0, 64, 40)];
     self.geneDnaLabel.textAlignment = NSTextAlignmentRight;
-    self.geneDnaLabel.font = [UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightBold];
-    self.geneDnaLabel.textColor = [UIColor colorWithRed:0.78 green:0.62 blue:1 alpha:1];
-    [self.genePage addSubview:self.geneDnaLabel];
+    self.geneDnaLabel.font = [UIFont monospacedDigitSystemFontOfSize:17 weight:UIFontWeightBold];
+    self.geneDnaLabel.textColor = [UIColor colorWithRed:0.82 green:0.70 blue:1 alpha:1];
+    [dnaPill addSubview:self.geneDnaLabel];
 
     UILabel *qtyTitle = [[UILabel alloc] initWithFrame:CGRectMake(20, 118, 80, 28)];
     qtyTitle.text = @"每次升级";
@@ -1596,6 +1622,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 
 - (NSInteger)geneLevelFor:(NSInteger)i {
     switch (i) {
+        case 0: return self.geneOfflineLevel;
         case 1: return self.geneLevel;
         case 2: return self.geneTapLevel;
         case 3: return self.geneSporeLevel;
@@ -1615,7 +1642,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 
 - (double)geneBasePrice:(NSInteger)i {
     switch (i) {
-        case 0: return 1;    // 离线收益（一次性）
+        case 0: return 1;    // 离线收益（可无限叠加）
         case 4: return 3;    // 自动触手
         case 5: return 2;    // 飞升红利
         case 6: return 3;    // 起始遗泽
@@ -1625,7 +1652,6 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 }
 
 - (NSInteger)geneCostAtLevel:(NSInteger)i {
-    if (i == 0) return 1;
     double c = [self geneBasePrice:i] * pow(GENE_PRICE_GROWTH, (double)[self geneLevelFor:i]);
     if (c >= 9.0e18) return (NSInteger)9.0e18;
     return MAX(1, (NSInteger)ceil(c));
@@ -1633,7 +1659,6 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 
 // 连买 k 级的总花费（等比求和）
 - (NSInteger)geneCostSum:(NSInteger)i count:(NSInteger)k {
-    if (i == 0) return 1;
     if (k <= 0) k = 1;
     double a = (double)[self geneCostAtLevel:i];
     double r = GENE_PRICE_GROWTH;
@@ -1643,12 +1668,12 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 }
 
 - (NSInteger)geneMaxCountFor:(NSInteger)i {
-    if (i == 0) return 1;
     double a = (double)[self geneCostAtLevel:i];
     double dna = (double)self.dna;
     if (a > dna) return 1;
     double k = log(1.0 + dna * (GENE_PRICE_GROWTH - 1.0) / a) / log(GENE_PRICE_GROWTH);
     NSInteger kk = (NSInteger)floor(k);
+    if (i == 0) kk = MIN(kk, (NSInteger)5);
     if (kk < 1) kk = 1;
     if (kk > 500) kk = 500;
     while (kk > 1 && [self geneCostSum:i count:kk] > self.dna) kk--;
@@ -1657,7 +1682,6 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 }
 
 - (NSInteger)geneBuyCountFor:(NSInteger)i {
-    if (i == 0) return 1;
     if (self.geneQtyMode == 0) return 1;
     if (self.geneQtyMode == 1) return 10;
     return [self geneMaxCountFor:i];
@@ -1669,7 +1693,6 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 }
 
 - (NSInteger)geneCostFor:(NSInteger)i {
-    if (i == 0) return 1;
     if (i == 4) return 3 + 3 * self.geneAutoLevel;
     if (i == 5) return self.geneAscendLevel + 2;
     if (i == 6) return self.geneStartLevel + 3;
@@ -1679,7 +1702,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 
 - (void)refreshGenePage {
     if (self.genePage.hidden) return;
-    self.geneDnaLabel.text = [NSString stringWithFormat:@"🧬 %@", FmtInt(self.dna)];
+    self.geneDnaLabel.text = FmtInt(self.dna);
 
     for (NSInteger i = 0; i < (NSInteger)self.geneQtyBtns.count; i++) {
         UIButton *qb = self.geneQtyBtns[i];
@@ -1696,25 +1719,21 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
         NSString *base = [NSString stringWithUTF8String:kGenes[i].name];
 
         if (i == 0) {
-            nm.text = base;
-            RollLabel *pr = self.genePriceRolls[i];
-            RollLabel *sr = self.geneSubRolls[i];
-            if (self.offlineUnlocked) {
-                pr.text = @"已解锁";
-                pr.textColor = [UIColor colorWithWhite:1 alpha:0.5];
-                sr.text = @"";
-                [buy setTitle:@"" forState:UIControlStateNormal];
-                buy.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
-                [buy setTitleColor:[UIColor colorWithWhite:1 alpha:0.5] forState:UIControlStateNormal];
-                buy.enabled = NO;
-            } else {
-                pr.text = @"1 🧬";
-                pr.textColor = [UIColor colorWithWhite:0 alpha:0.85];
-                sr.text = @"";
-                [buy setTitle:@"" forState:UIControlStateNormal];
-                buy.backgroundColor = [UIColor colorWithRed:0.35 green:0.95 blue:0.55 alpha:0.9];
-                buy.enabled = (self.dna >= 1);
-            }
+            NSInteger olv = self.geneOfflineLevel;
+            NSInteger ok = [self geneBuyCountFor:0];
+            NSInteger ocost = [self geneCostSum:0 count:ok];
+            nm.text = [NSString stringWithFormat:@"%@ Lv.%@", base, FmtInt(olv)];
+            RollLabel *pr = self.genePriceRolls[0];
+            RollLabel *sr = self.geneSubRolls[0];
+            BOOL ocan = (self.dna >= ocost);
+            pr.text = [NSString stringWithFormat:@"%@ 🧬", FmtInt(ocost)];
+            pr.textColor = ocan ? [UIColor colorWithWhite:0 alpha:0.85] : [UIColor colorWithWhite:1 alpha:0.45];
+            sr.text = [NSString stringWithFormat:@"返还 %.0f%% · 上限 %.0f 小时%@", [self offlineReturnRate] * 100.0,
+                       [self offlineCapHours], (ok > 1) ? [NSString stringWithFormat:@" · +%@ 级", FmtInt(ok)] : @""];
+            sr.textColor = [UIColor colorWithWhite:1 alpha:0.55];
+            [buy setTitle:@"" forState:UIControlStateNormal];
+            buy.backgroundColor = ocan ? [UIColor colorWithRed:0.35 green:0.95 blue:0.55 alpha:0.9]
+                                       : [UIColor colorWithWhite:1 alpha:0.10];
             continue;
         }
 
@@ -1724,11 +1743,10 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
         nm.text = [NSString stringWithFormat:@"%@ Lv.%@", base, FmtInt(lv)];
         RollLabel *pr2 = self.genePriceRolls[i];
         RollLabel *sr2 = self.geneSubRolls[i];
-        BOOL maxed = (lv >= kGeneMaxLevel);
-        pr2.text = maxed ? @"已满级" : [NSString stringWithFormat:@"%@ 🧬", FmtInt(cost)];
-        sr2.text = maxed ? @"" : ((k > 1) ? [NSString stringWithFormat:@"+%@ 级", FmtInt(k)] : @"");
+        pr2.text = [NSString stringWithFormat:@"%@ 🧬", FmtInt(cost)];
+        sr2.text = (k > 1) ? [NSString stringWithFormat:@"+%@ 级", FmtInt(k)] : @"";
         [buy setTitle:@"" forState:UIControlStateNormal];
-        BOOL can = (self.dna >= cost) && !maxed;
+        BOOL can = (self.dna >= cost);
         buy.backgroundColor = can ? [UIColor colorWithRed:0.35 green:0.95 blue:0.55 alpha:0.9]
                                   : [UIColor colorWithWhite:1 alpha:0.10];
         pr2.textColor = can ? [UIColor colorWithWhite:0 alpha:0.85] : [UIColor colorWithWhite:1 alpha:0.45];
@@ -1737,11 +1755,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 
 - (void)onGeneRow:(UIButton *)b {
     NSInteger i = b.tag;
-    if (i != 0 && [self geneLevelFor:i] >= kGeneMaxLevel) {
-        [self toast:[NSString stringWithFormat:@"该基因已满级（Lv.%ld）", (long)kGeneMaxLevel]];
-        return;
-    }
-    if (i == 0 && self.offlineUnlocked) { [self toast:@"离线收益已解锁"]; return; }
+
 
     NSInteger k = [self geneBuyCountFor:i];
     NSInteger cost = [self geneCostSum:i count:k];
@@ -1759,8 +1773,10 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     NSString *msg = nil;
     switch (i) {
         case 0:
+            self.geneOfflineLevel += k;
             self.offlineUnlocked = YES;
-            msg = @"⏳ 离线收益已解锁";
+            msg = [NSString stringWithFormat:@"⏳ 离线收益 Lv.%@（返还 %.0f%% · 上限 %.0f 小时）",
+                   FmtInt(self.geneOfflineLevel), [self offlineReturnRate] * 100.0, [self offlineCapHours]];
             break;
         case 1:
             self.geneLevel += k;
@@ -2621,7 +2637,10 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
                            ([self boostMult] > 1) ? @"  ⚡×7加速中" : @""];
     self.rateLabel.text = [NSString stringWithFormat:@"👆 点击 %@/次    ⏳ 离线收益 %@",
                            FmtNum([self tapPower]),
-                           self.offlineUnlocked ? @"已解锁" : @"待DNA解锁"];
+                           ([self geneEffLevel:0] > 0)
+                               ? [NSString stringWithFormat:@"Lv.%@（%.0f%%/%.0fh）", FmtInt(self.geneOfflineLevel),
+                                  [self offlineReturnRate] * 100.0, [self offlineCapHours]]
+                               : @"待DNA解锁"];
 
     // 连击
     if (self.combo > 1.05) {
@@ -2927,6 +2946,16 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
 }
 
 // ================= 时代事件 =================
+- (NSString *)eventNamePlain:(NSInteger)k {
+    switch (k) {
+        case 1: return @"陨石撞击";
+        case 2: return @"寒武纪大爆发";
+        case 3: return @"超新星爆发";
+        case 4: return @"熵坍缩";
+        default: return @"";
+    }
+}
+
 - (NSString *)eventTitle:(NSInteger)k {
     switch (k) {
         case 1: return @"☄️ 陨石撞击";
@@ -2935,6 +2964,209 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
         case 4: return @"🕳 熵坍缩";
         default: return @"";
     }
+}
+
+static UIColor *EventColor(NSInteger k) {
+    switch (k) {
+        case 1: return [UIColor colorWithRed:1.00 green:0.42 blue:0.22 alpha:1];
+        case 2: return [UIColor colorWithRed:0.30 green:1.00 blue:0.62 alpha:1];
+        case 3: return [UIColor colorWithRed:1.00 green:0.86 blue:0.40 alpha:1];
+        default: return [UIColor colorWithRed:0.72 green:0.42 blue:1.00 alpha:1];
+    }
+}
+
+static NSString *EventIcon(NSInteger k) {
+    switch (k) {
+        case 1: return @"☄️";
+        case 2: return @"🦠";
+        case 3: return @"💥";
+        default: return @"🌀";
+    }
+}
+
+static NSString *EventEffectText(NSInteger k, double d, double gain) {
+    switch (k) {
+        case 1: return [NSString stringWithFormat:@"产出 −50%% · 持续 %.0f 秒", d];
+        case 2: return [NSString stringWithFormat:@"产出 ×2 · 持续 %.0f 秒", d];
+        case 3: return [NSString stringWithFormat:@"瞬间 +%@ 能量", FmtNum(gain)];
+        default: return [NSString stringWithFormat:@"成本 +35%% · 持续 %.0f 秒", d];
+    }
+}
+
+- (void)buildEventBanner {
+    CGFloat W = self.view.bounds.size.width;
+    CGRect f = CGRectMake(14, 106, W - 28, 70);
+    UIView *b = [[UIView alloc] initWithFrame:CGRectOffset(f, 0, -130)];
+    b.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.92];
+    b.layer.cornerRadius = 16;
+    b.layer.borderWidth = 1.6;
+    b.layer.borderColor = [[UIColor colorWithWhite:1 alpha:0.35] CGColor];
+    b.layer.shadowColor = [[UIColor blackColor] CGColor];
+    b.layer.shadowOpacity = 0.45;
+    b.layer.shadowRadius = 10;
+    b.layer.shadowOffset = CGSizeMake(0, 4);
+    b.userInteractionEnabled = NO;
+    b.alpha = 0;
+    b.hidden = YES;
+    [self.view addSubview:b];
+    self.eventBanner = b;
+
+    self.eventBannerIcon = [[UILabel alloc] initWithFrame:CGRectMake(8, 8, 52, 46)];
+    self.eventBannerIcon.textAlignment = NSTextAlignmentCenter;
+    self.eventBannerIcon.font = [UIFont systemFontOfSize:30];
+    [b addSubview:self.eventBannerIcon];
+
+    self.eventBannerTitle = [[UILabel alloc] initWithFrame:CGRectMake(64, 10, W - 160, 24)];
+    self.eventBannerTitle.font = [UIFont boldSystemFontOfSize:16];
+    self.eventBannerTitle.textColor = [UIColor whiteColor];
+    [b addSubview:self.eventBannerTitle];
+
+    self.eventBannerSub = [[UILabel alloc] initWithFrame:CGRectMake(64, 33, W - 160, 17)];
+    self.eventBannerSub.font = [UIFont systemFontOfSize:11.5];
+    self.eventBannerSub.textColor = [UIColor colorWithWhite:1 alpha:0.72];
+    self.eventBannerSub.adjustsFontSizeToFitWidth = YES;
+    self.eventBannerSub.minimumScaleFactor = 0.7;
+    [b addSubview:self.eventBannerSub];
+
+    self.eventBannerTime = [[UILabel alloc] initWithFrame:CGRectMake(W - 106, 14, 84, 34)];
+    self.eventBannerTime.textAlignment = NSTextAlignmentRight;
+    self.eventBannerTime.font = [UIFont monospacedDigitSystemFontOfSize:19 weight:UIFontWeightBold];
+    self.eventBannerTime.textColor = [UIColor whiteColor];
+    [b addSubview:self.eventBannerTime];
+
+    UIView *fillBg = [[UIView alloc] initWithFrame:CGRectMake(14, 56, W - 56, 5)];
+    fillBg.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12];
+    fillBg.layer.cornerRadius = 2.5;
+    fillBg.clipsToBounds = YES;
+    [b addSubview:fillBg];
+
+    self.eventBannerFill = [[UIView alloc] initWithFrame:CGRectMake(0, 0, fillBg.bounds.size.width, 5)];
+    self.eventBannerFill.backgroundColor = [UIColor whiteColor];
+    [fillBg addSubview:self.eventBannerFill];
+    [self.view bringSubviewToFront:b];
+}
+
+- (void)showEventBannerForKind:(NSInteger)k duration:(double)d gain:(double)gain {
+    if (self.eventBanner == nil) [self buildEventBanner];
+    UIColor *c = EventColor(k);
+    self.eventBannerIcon.text = EventIcon(k);
+    self.eventBannerTitle.text = [self eventNamePlain:k];
+    self.eventBannerSub.text = EventEffectText(k, d, gain);
+    self.eventBannerSub.textColor = [UIColor colorWithWhite:1 alpha:0.75];
+    self.eventBannerTime.textColor = c;
+    self.eventBannerTime.text = [NSString stringWithFormat:@"%.0fs", d];
+    self.eventBanner.layer.borderColor = [c CGColor];
+    self.eventBannerFill.backgroundColor = c;
+
+    CGRect target = CGRectMake(14, 106, self.view.bounds.size.width - 28, 70);
+    self.eventBanner.hidden = NO;
+    self.eventBannerVisible = YES;
+    self.eventBannerHideAt = [[NSDate date] timeIntervalSince1970] + d;
+    self.eventBannerShownAt = [[NSDate date] timeIntervalSince1970];
+    self.eventBannerTime.text = [NSString stringWithFormat:@"%.0fs", d];
+    self.eventBanner.frame = CGRectMake(target.origin.x, -150, target.size.width, target.size.height);
+    self.eventBanner.alpha = 0;
+    [UIView animateWithDuration:0.42 delay:0 usingSpringWithDamping:0.72 initialSpringVelocity:0.6
+                        options:UIViewAnimationOptionCurveEaseOut animations:^{
+        self.eventBanner.frame = target;
+        self.eventBanner.alpha = 1;
+    } completion:nil];
+
+    // 横幅呼吸光晕
+    CABasicAnimation *glow = [CABasicAnimation animationWithKeyPath:@"shadowOpacity"];
+    glow.fromValue = @0.20; glow.toValue = @0.85;
+    glow.duration = 0.9; glow.autoreverses = YES; glow.repeatCount = 8;
+    [self.eventBanner.layer addAnimation:glow forKey:@"eventGlow"];
+    [self.view bringSubviewToFront:self.eventBanner];
+}
+
+- (void)hideEventBanner {
+    if (self.eventBanner == nil || !self.eventBannerVisible) return;
+    self.eventBannerVisible = NO;
+    UIView *b = self.eventBanner;
+    CGRect up = b.frame;
+    up.origin.y = -150;
+    [UIView animateWithDuration:0.32 animations:^{
+        b.frame = up;
+        b.alpha = 0;
+    } completion:^(BOOL f) {
+        b.hidden = YES;
+        b.frame = CGRectMake(14, 106, self.view.bounds.size.width - 28, 70);
+    }];
+}
+
+- (void)eventFXForKind:(NSInteger)k {
+    CGFloat W = self.view.bounds.size.width, H = self.view.bounds.size.height;
+    CGPoint ctr = CGPointMake(W / 2, H * 0.34);
+    UIColor *c = EventColor(k);
+
+    // 全屏闪光 + 震屏，每种事件不同强度
+    CGFloat alpha = (k == 3) ? 0.62 : (k == 1 ? 0.26 : 0.22);
+    [self flashScreen:c alpha:alpha];
+    [self shakeScreen:(k == 3 ? 11 : (k == 1 ? 8 : 6))];
+
+    if (k == 1) {
+        // 陨石：多条斜向拖尾光点
+        for (NSInteger i = 0; i < 9; i++) {
+            UIView *dot = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 9, 9)];
+            dot.backgroundColor = c;
+            dot.layer.cornerRadius = 4.5;
+            dot.layer.shadowColor = [c CGColor];
+            dot.layer.shadowOpacity = 0.9;
+            dot.layer.shadowRadius = 7;
+            dot.center = CGPointMake(W + 40 - i * 22, -30 - i * 34);
+            [self.view addSubview:dot];
+            CGPoint end = CGPointMake(-40 + i * 52, H * 0.78 + i * 26);
+            [UIView animateWithDuration:0.85 delay:i * 0.11
+                                options:UIViewAnimationOptionCurveEaseIn animations:^{
+                dot.center = end;
+                dot.alpha = 0;
+            } completion:^(BOOL f) { [dot removeFromSuperview]; }];
+        }
+        [self sparkBurstAt:ctr color:c count:26 speed:240];
+        [self shockwaveAt:ctr color:c maxRadius:MIN(W, 420)];
+    } else if (k == 2) {
+        // 寒武爆发：多层绿色扩张波 + 粒子雨
+        [self shockwaveAt:ctr color:c maxRadius:MIN(W, 460)];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.22 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self shockwaveAt:CGPointMake(W / 2, H * 0.44) color:c maxRadius:MIN(W, 360)];
+        });
+        for (NSInteger i = 0; i < 6; i++) {
+            CGPoint p = CGPointMake(30 + arc4random_uniform((uint32_t)(W - 60)), H * 0.18 + arc4random_uniform((uint32_t)(H * 0.5)));
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((0.15 + 0.1 * i) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self sparkBurstAt:p color:c count:12 speed:150];
+            });
+        }
+    } else if (k == 3) {
+        // 超新星：白金色大冲击波 + 大量粒子
+        [self shockwaveAt:ctr color:c maxRadius:MIN(W, 520)];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.14 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self shockwaveAt:ctr color:[UIColor whiteColor] maxRadius:MIN(W, 380)];
+        });
+        [self sparkBurstAt:ctr color:c count:44 speed:340];
+        [self sparkBurstAt:ctr color:[UIColor whiteColor] count:18 speed:200];
+    } else {
+        // 熵坍缩：自上而下的紫色扫描带 + 暗紫闪
+        UIView *scan = [[UIView alloc] initWithFrame:CGRectMake(0, -60, W, 60)];
+        scan.backgroundColor = [UIColor colorWithRed:0.62 green:0.28 blue:1 alpha:0.35];
+        scan.userInteractionEnabled = NO;
+        [self.view addSubview:scan];
+        [UIView animateWithDuration:1.1 animations:^{
+            scan.frame = CGRectMake(0, H, W, 60);
+            scan.alpha = 0;
+        } completion:^(BOOL f) { [scan removeFromSuperview]; }];
+        [self shockwaveAt:CGPointMake(W / 2, H * 0.5) color:c maxRadius:MIN(W, 380)];
+        [self sparkBurstAt:ctr color:c count:16 speed:120];
+    }
+}
+
+- (void)eventAmbientPulse {
+    // 事件期间的环境粒子，强化"世界正在变化"的感觉
+    if (self.eventKind == 0) return;
+    CGFloat W = self.view.bounds.size.width, H = self.view.bounds.size.height;
+    UIColor *c = EventColor(self.eventKind);
+    CGPoint p = CGPointMake(20 + arc4random_uniform((uint32_t)(W - 40)), H * 0.2 + arc4random_uniform((uint32_t)(H * 0.55)));
+    [self sparkBurstAt:p color:c count:5 speed:70];
 }
 
 - (void)triggerEvent {
@@ -2950,6 +3182,9 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
         [self floatGain:gain prefix:@"💥" color:[UIColor colorWithRed:1 green:0.62 blue:0.30 alpha:1]
                      size:24 at:[self creatureCenterInView] rise:100];
         [self toast:[NSString stringWithFormat:@"💥 超新星爆发 ⚡+%@", FmtNum(gain)]];
+        [self playSFX:@"event"];
+        [self eventFXForKind:3];
+        [self showEventBannerForKind:3 duration:5.0 gain:gain];
         self.nextEventAt = now + 130.0;
         return;
     }
@@ -2958,16 +3193,34 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     self.eventKind = k;
     self.eventEnd = now + d;
     self.nextEventAt = now + 150.0;
-    [self flashScreen:(k == 1 ? [UIColor redColor] : (k == 2 ? [UIColor greenColor] : [UIColor purpleColor])) alpha:0.18];
-    [self shakeScreen:(k == 1 ? 7 : 4)];
+    [self playSFX:@"event"];
+    [self eventFXForKind:k];
+    [self showEventBannerForKind:k duration:d gain:0];
     [self toast:[NSString stringWithFormat:@"%@ 降临（%.0f 秒）", [self eventTitle:k], d]];
     [self refreshDynamic];
 }
 
 - (void)handleEventsAndAchievements {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+
+    // 事件横幅：倒计时 + 进度条 + 环境粒子
+    if (self.eventBannerVisible) {
+        double left = self.eventBannerHideAt - now;
+        double span = MAX(0.1, self.eventBannerHideAt - self.eventBannerShownAt);
+        double ratio = MAX(0.0, MIN(1.0, left / span));
+        CGFloat bw = self.eventBanner.bounds.size.width - 56;
+        self.eventBannerTime.text = [NSString stringWithFormat:@"%.0fs", MAX(0.0, left)];
+        self.eventBannerFill.frame = CGRectMake(0, 0, bw * ratio, 5);
+        if (left <= 0) [self hideEventBanner];
+    }
+    if (self.eventKind > 0) {
+        self.eventFXTick += 1;
+        if (self.eventFXTick % 2 == 0) [self eventAmbientPulse];
+    }
+
     if (self.eventKind > 0 && now >= self.eventEnd) {
         self.eventKind = 0;
+        [self hideEventBanner];
         [self toast:@"环境恢复平静"];
         [self refreshDynamic];
     }
@@ -3615,7 +3868,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     [ac addAction:[UIAlertAction actionWithTitle:@"全部重置" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
         self.energy = 0; self.shownEnergy = 0; self.runEarned = 0; self.stage = 0; self.combo = 1;
         self.dna = 0; self.ascensions = 0; self.offlineUnlocked = NO; self.geneLevel = 0;
-        self.geneTapLevel = 0; self.geneSporeLevel = 0; self.geneAutoLevel = 0;
+        self.geneTapLevel = 0; self.geneSporeLevel = 0; self.geneAutoLevel = 0; self.geneOfflineLevel = 0;
         self.geneAscendLevel = 0; self.geneStartLevel = 0; self.geneSporeRateLevel = 0;
         self.totalEarned = 0;
         self.maxStage = 0; self.relicPoints = 0; self.totalTaps = 0;
@@ -3692,6 +3945,9 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     self.sfxBuffers[@"evolve"] = [self sfxBufferWithNotes:@[@[@523, @0, @0.14], @[@659, @0.13, @0.14], @[@784, @0.26, @0.20]] total:0.50 gain:0.17];
     // 飞升：四音上行和弦
     self.sfxBuffers[@"ascend"] = [self sfxBufferWithNotes:@[@[@392, @0, @0.28], @[@523, @0.12, @0.28], @[@659, @0.26, @0.30], @[@784, @0.40, @0.45]] total:0.95 gain:0.18];
+    // 时代事件：低沉轰鸣
+    self.sfxBuffers[@"event"] = [self sfxBufferWithNotes:@[@[@96, @0, @0.30], @[@72, @0.16, @0.40], @[@140, @0.42, @0.22]]
+                                                   total:0.78 gain:0.20];
     // 孢子：清脆铃音
     self.sfxBuffers[@"spore"] = [self sfxBufferWithNotes:@[@[@1568, @0, @0.09], @[@2093, @0.045, @0.11]] total:0.22 gain:0.16];
 

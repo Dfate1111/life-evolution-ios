@@ -1,0 +1,8 @@
+Package: com.demo.lifeevolution
+Name: 生命进化
+Version: 6.3.1
+Architecture: iphoneos-arm64
+Description: 生命进化点击放置游戏
+Maintainer: demo
+Author: demo
+Section: Games

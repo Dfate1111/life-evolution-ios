@@ -2992,7 +2992,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
 - (void)onSecondTick {
     [self handleEventsAndAchievements];
     double autoGain = 0;
-    NSInteger autoHands = [self geneEffLevel:5];
+    NSInteger autoHands = [self geneEffLevel:4];
     if (autoHands > 0) {
         autoGain = [self tapPower] * (double)autoHands;
         self.energyPop = MIN(1.0, self.energyPop + 0.18);

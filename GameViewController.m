@@ -3567,7 +3567,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
 - (void)sporeBanner:(NSString *)title value:(NSString *)value detail:(NSString *)detail accent:(UIColor *)accent {
     CGFloat W = self.view.bounds.size.width, H = self.view.bounds.size.height;
     UIView *card = [[UIView alloc] initWithFrame:CGRectMake(0, 0, W - 48, 138)];
-    card.center = CGPointMake(W / 2, H * 0.33);
+    card.center = CGPointMake(W / 2, H * 0.24);
     card.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.94];
     card.layer.cornerRadius = 22;
     card.layer.borderWidth = 2.5;
@@ -3576,6 +3576,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     card.layer.shadowOpacity = 0.75;
     card.layer.shadowRadius = 20;
     card.layer.shadowOffset = CGSizeZero;
+    card.userInteractionEnabled = NO;   // 点击穿透，不挡生物区与孢子按钮
 
     UILabel *t1 = [[UILabel alloc] initWithFrame:CGRectMake(14, 14, card.bounds.size.width - 28, 22)];
     t1.text = title; t1.textAlignment = NSTextAlignmentCenter;

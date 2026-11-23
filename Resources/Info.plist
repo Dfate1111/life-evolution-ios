@@ -11,15 +11,15 @@
     <key>CFBundleIdentifier</key>
     <string>com.demo.lifeevolution</string>
     <key>CFBundleInfoDictionaryVersion</key>
-    <string>7.1</string>
+    <string>7.2</string>
     <key>CFBundleName</key>
     <string>LifeEvolution</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>7.1</string>
+    <string>7.2</string>
     <key>CFBundleVersion</key>
-    <string>71</string>
+    <string>73</string>
     <key>CFBundleSupportedPlatforms</key>
     <array>
         <string>iPhoneOS</string>

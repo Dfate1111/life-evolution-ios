@@ -3018,25 +3018,26 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     self.eventBannerIcon.font = [UIFont systemFontOfSize:30];
     [b addSubview:self.eventBannerIcon];
 
-    self.eventBannerTitle = [[UILabel alloc] initWithFrame:CGRectMake(64, 10, W - 160, 24)];
+    CGFloat bw = W - 28;                               // 横幅自身宽度
+    self.eventBannerTitle = [[UILabel alloc] initWithFrame:CGRectMake(64, 10, bw - 64 - 86, 24)];
     self.eventBannerTitle.font = [UIFont boldSystemFontOfSize:16];
     self.eventBannerTitle.textColor = [UIColor whiteColor];
     [b addSubview:self.eventBannerTitle];
 
-    self.eventBannerSub = [[UILabel alloc] initWithFrame:CGRectMake(64, 33, W - 160, 17)];
+    self.eventBannerSub = [[UILabel alloc] initWithFrame:CGRectMake(64, 33, bw - 64 - 86, 17)];
     self.eventBannerSub.font = [UIFont systemFontOfSize:11.5];
     self.eventBannerSub.textColor = [UIColor colorWithWhite:1 alpha:0.72];
     self.eventBannerSub.adjustsFontSizeToFitWidth = YES;
     self.eventBannerSub.minimumScaleFactor = 0.7;
     [b addSubview:self.eventBannerSub];
 
-    self.eventBannerTime = [[UILabel alloc] initWithFrame:CGRectMake(W - 106, 14, 84, 34)];
+    self.eventBannerTime = [[UILabel alloc] initWithFrame:CGRectMake(bw - 76, 12, 62, 32)];
     self.eventBannerTime.textAlignment = NSTextAlignmentRight;
     self.eventBannerTime.font = [UIFont monospacedDigitSystemFontOfSize:19 weight:UIFontWeightBold];
     self.eventBannerTime.textColor = [UIColor whiteColor];
     [b addSubview:self.eventBannerTime];
 
-    UIView *fillBg = [[UIView alloc] initWithFrame:CGRectMake(14, 56, W - 56, 5)];
+    UIView *fillBg = [[UIView alloc] initWithFrame:CGRectMake(14, 56, bw - 28, 5)];
     fillBg.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12];
     fillBg.layer.cornerRadius = 2.5;
     fillBg.clipsToBounds = YES;

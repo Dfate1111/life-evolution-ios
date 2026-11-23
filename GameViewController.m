@@ -227,6 +227,21 @@ static const GeneDef kGenes[] = {
 };
 static const NSInteger kGeneCount = sizeof(kGenes) / sizeof(kGenes[0]);
 
+// 基因组技能树：gene=对应 kGenes 索引；tier=层级；col 0=左 1=右 2=居中；parent=前置节点(-1 为根)
+typedef struct { NSInteger gene; NSInteger tier; NSInteger col; NSInteger parent; } GeneNodeDef;
+static const GeneNodeDef kGeneNodes[] = {
+    {1, 0, 2, -1},   // 🧬 基因强化（根）
+    {2, 1, 0, 1},    // 👆 点击强化
+    {4, 1, 1, 1},    // 🤖 自动触手
+    {0, 2, 0, 2},    // ⏳ 离线收益
+    {3, 2, 1, 4},    // ✨ 孢子亲和
+    {8, 3, 0, 0},    // ⚔️ 试炼锋芒
+    {7, 3, 1, 3},    // 🌠 孢子之频
+    {5, 4, 0, 8},    // 🕊 飞升红利
+    {6, 4, 1, 7},    // 🌱 起始遗泽
+};
+static const NSInteger kGeneNodeCount = sizeof(kGeneNodes) / sizeof(kGeneNodes[0]);
+
 // 单条基因等级上限，避免 DNA 无限灌入导致数值爆炸
 static const NSInteger kGeneMaxLevel = 999999;   // 强化不再有等级上限
 
@@ -722,6 +737,10 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @property (nonatomic) NSInteger currentTab;
 @property (nonatomic, strong) UIView *genePage, *mutPage, *recordPage;
 @property (nonatomic, strong) UILabel *geneDnaLabel;
+@property (nonatomic, strong) UIScrollView *geneScroll;
+@property (nonatomic, strong) NSMutableArray<UIButton *> *geneNodeCards;
+@property (nonatomic, strong) NSMutableArray *geneNodeLines;
+@property (nonatomic, strong) NSMutableArray *geneNodeFrames;
 @property (nonatomic, strong) NSMutableArray<UIButton *> *geneBuyBtns;
 @property (nonatomic, strong) NSMutableArray<UILabel *> *geneNameLabels;
 @property (nonatomic, strong) NSMutableArray<RollLabel *> *genePriceRolls;
@@ -767,6 +786,9 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     self.tabIcons = [NSMutableArray array];
     self.tabLabels = [NSMutableArray array];
     self.mutCountLabels = [NSMutableArray array];
+    self.geneNodeCards = [NSMutableArray array];
+    self.geneNodeLines = [NSMutableArray array];
+    self.geneNodeFrames = [NSMutableArray array];
     self.geneBuyBtns = [NSMutableArray array];
     self.geneQtyBtns = [NSMutableArray array];
     self.geneNameLabels = [NSMutableArray array];
@@ -1469,7 +1491,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     CGFloat W = self.view.bounds.size.width;
 
     // ---- 基因组 ----
-    self.genePage = [self makePageWithTitle:@"基因组" subtitle:@"用 DNA 解锁永久强化 · 飞升后保留"];
+    self.genePage = [self makePageWithTitle:@"基因树" subtitle:@"沿连线逐个点亮 · DNA 永久保留"];
     UIView *dnaPill = [[UIView alloc] initWithFrame:CGRectMake(W - 138, 52, 120, 40)];
     dnaPill.backgroundColor = [UIColor colorWithRed:0.30 green:0.16 blue:0.50 alpha:0.55];
     dnaPill.layer.cornerRadius = 20;
@@ -1489,97 +1511,102 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     self.geneDnaLabel.textColor = [UIColor colorWithRed:0.82 green:0.70 blue:1 alpha:1];
     [dnaPill addSubview:self.geneDnaLabel];
 
-    UILabel *qtyTitle = [[UILabel alloc] initWithFrame:CGRectMake(20, 118, 80, 28)];
-    qtyTitle.text = @"每次升级";
-    qtyTitle.font = [UIFont systemFontOfSize:11];
-    qtyTitle.textColor = [UIColor colorWithWhite:1 alpha:0.5];
-    [self.genePage addSubview:qtyTitle];
+    // ---- 技能树 ----
+    self.geneScroll = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 104, W, self.genePage.bounds.size.height - 104)];
+    self.geneScroll.alwaysBounceVertical = YES;
+    self.geneScroll.showsVerticalScrollIndicator = NO;
+    [self.genePage addSubview:self.geneScroll];
 
-    NSArray *qt = @[@"1 级", @"10 级", @"最大"];
-    CGFloat qx = 100, qw = (W - 120) / 3.0;
-    for (NSInteger i = 0; i < 3; i++) {
-        UIButton *qb = [UIButton buttonWithType:UIButtonTypeCustom];
-        qb.frame = CGRectMake(qx + i * qw + 2, 118, qw - 4, 28);
-        qb.layer.cornerRadius = 14;
-        qb.tag = i;
-        qb.titleLabel.font = [UIFont boldSystemFontOfSize:12];
-        [qb setTitle:qt[i] forState:UIControlStateNormal];
-        [qb setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        [qb addTarget:self action:@selector(onGeneQty:) forControlEvents:UIControlEventTouchUpInside];
-        [self.genePage addSubview:qb];
-        [self.geneQtyBtns addObject:qb];
-    }
+    CGFloat nw = floor((W - 32 - 14) / 2.0), nh = 102, tierGap = 40;
+    CGFloat top0 = 16;
+    [self.geneNodeCards removeAllObjects];
+    [self.geneNodeLines removeAllObjects];
+    [self.geneNodeFrames removeAllObjects];
 
-    UIScrollView *geneScroll = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 158, W, self.genePage.bounds.size.height - 158)];
-    geneScroll.alwaysBounceVertical = YES;
-    geneScroll.showsVerticalScrollIndicator = NO;
-    [self.genePage addSubview:geneScroll];
+    for (NSInteger i = 0; i < kGeneNodeCount; i++) {
+        GeneNodeDef nd = kGeneNodes[i];
+        CGFloat y = top0 + nd.tier * (nh + tierGap);
+        CGFloat x = (nd.col == 0) ? 16 : (nd.col == 1 ? 16 + nw + 14 : (W - nw) / 2.0);
+        CGRect fr = CGRectMake(x, y, nw, nh);
+        [self.geneNodeFrames addObject:[NSValue valueWithCGRect:fr]];
 
-    for (NSInteger i = 0; i < kGeneCount; i++) {
-        CGFloat y = i * 100;
-        UIView *card = [[UIView alloc] initWithFrame:CGRectMake(16, y, W - 32, 90)];
+        UIButton *card = [UIButton buttonWithType:UIButtonTypeCustom];
+        card.frame = fr;
+        card.tag = i;
+        card.layer.cornerRadius = 18;
+        card.layer.borderWidth = 1;
         card.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
-        card.layer.cornerRadius = 16;
-        [geneScroll addSubview:card];
+        card.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
+        [card addTarget:self action:@selector(onGeneNode:) forControlEvents:UIControlEventTouchUpInside];
+        [self.geneScroll addSubview:card];
+        [self.geneNodeCards addObject:card];
 
-        UILabel *ic = [[UILabel alloc] initWithFrame:CGRectMake(14, 16, 40, 40)];
-        ic.text = [NSString stringWithUTF8String:kGenes[i].icon];
-        ic.font = [UIFont systemFontOfSize:26];
+        UILabel *ic = [[UILabel alloc] initWithFrame:CGRectMake(8, 8, 26, 26)];
+        ic.text = [NSString stringWithUTF8String:kGenes[nd.gene].icon];
+        ic.font = [UIFont systemFontOfSize:19];
         ic.textAlignment = NSTextAlignmentCenter;
-        ic.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
-        ic.layer.cornerRadius = 11;
-        ic.clipsToBounds = YES;
+        ic.userInteractionEnabled = NO;
         [card addSubview:ic];
 
-        RollLabel *nm = [[RollLabel alloc] initWithFrame:CGRectMake(64, 15, W - 32 - 168, 22)];
-        nm.text = [NSString stringWithUTF8String:kGenes[i].name];
-        nm.font = [UIFont boldSystemFontOfSize:15.5];
+        UILabel *nm = [[UILabel alloc] initWithFrame:CGRectMake(36, 8, nw - 42, 16)];
+        nm.text = [NSString stringWithUTF8String:kGenes[nd.gene].name];
+        nm.font = [UIFont boldSystemFontOfSize:12];
         nm.textColor = [UIColor whiteColor];
+        nm.userInteractionEnabled = NO;
+        nm.tag = 1001;
         [card addSubview:nm];
-        [self.geneNameLabels addObject:nm];
 
-        UILabel *ds = [[UILabel alloc] initWithFrame:CGRectMake(64, 39, W - 32 - 150, 30)];
-        ds.numberOfLines = 2;
-        ds.text = [NSString stringWithUTF8String:kGenes[i].desc];
-        ds.font = [UIFont systemFontOfSize:10.5];
-        ds.textColor = [UIColor colorWithWhite:1 alpha:0.45];
+        UILabel *lv = [[UILabel alloc] initWithFrame:CGRectMake(36, 24, nw - 42, 13)];
+        lv.font = [UIFont monospacedDigitSystemFontOfSize:10.5 weight:UIFontWeightBold];
+        lv.textColor = [UIColor colorWithRed:0.82 green:0.68 blue:1 alpha:1];
+        lv.tag = 1002;
+        lv.userInteractionEnabled = NO;
+        [card addSubview:lv];
+
+        UILabel *ds = [[UILabel alloc] initWithFrame:CGRectMake(8, 42, nw - 16, 36)];
+        ds.numberOfLines = 3;
+        ds.text = [NSString stringWithUTF8String:kGenes[nd.gene].desc];
+        ds.font = [UIFont systemFontOfSize:8.5];
+        ds.textColor = [UIColor colorWithWhite:1 alpha:0.42];
+        ds.userInteractionEnabled = NO;
         [card addSubview:ds];
 
-        UIButton *buy = [UIButton buttonWithType:UIButtonTypeSystem];
-        buy.frame = CGRectMake(W - 32 - 84, 23, 74, 44);
-        buy.layer.cornerRadius = 12;
-        buy.titleLabel.font = [UIFont boldSystemFontOfSize:13];
-        buy.tag = i;
-        [buy setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-        [buy addTarget:self action:@selector(onGeneRow:) forControlEvents:UIControlEventTouchUpInside];
-        [card addSubview:buy];
-        [self.geneBuyBtns addObject:buy];
-
-        RollLabel *pr = [[RollLabel alloc] initWithFrame:CGRectMake(2, 4, 70, 18)];
-        pr.textAlignment = NSTextAlignmentCenter;
-        pr.font = [UIFont boldSystemFontOfSize:12];
-        pr.textColor = [UIColor whiteColor];
+        UILabel *pr = [[UILabel alloc] initWithFrame:CGRectMake(8, nh - 22, nw - 16, 16)];
+        pr.font = [UIFont boldSystemFontOfSize:11.5];
+        pr.textColor = [UIColor colorWithRed:0.80 green:0.92 blue:0.60 alpha:1];
+        pr.tag = 1003;
         pr.userInteractionEnabled = NO;
-        [buy addSubview:pr];
-        [self.genePriceRolls addObject:pr];
+        [card addSubview:pr];
 
-        RollLabel *sr = [[RollLabel alloc] initWithFrame:CGRectMake(2, 23, 70, 13)];
-        sr.textAlignment = NSTextAlignmentCenter;
-        sr.font = [UIFont systemFontOfSize:9];
-        sr.textColor = [UIColor colorWithWhite:1 alpha:0.62];
-        sr.userInteractionEnabled = NO;
-        [buy addSubview:sr];
-        [self.geneSubRolls addObject:sr];
+        UILabel *lock = [[UILabel alloc] initWithFrame:CGRectMake(8, nh - 22, nw - 16, 16)];
+        lock.font = [UIFont boldSystemFontOfSize:10];
+        lock.textColor = [UIColor colorWithRed:1.0 green:0.55 blue:0.45 alpha:0.9];
+        lock.tag = 1004;
+        lock.userInteractionEnabled = NO;
+        [card addSubview:lock];
+
+        // 连线
+        if (nd.parent >= 0) {
+            CAShapeLayer *ln = [CAShapeLayer layer];
+            ln.strokeColor = [UIColor colorWithWhite:1 alpha:0.16].CGColor;
+            ln.lineWidth = 1.6;
+            ln.fillColor = nil;
+            [self.geneScroll.layer addSublayer:ln];
+            [self.geneNodeLines addObject:ln];
+        } else {
+            [self.geneNodeLines addObject:[NSNull null]];
+        }
     }
 
-    UILabel *note = [[UILabel alloc] initWithFrame:CGRectMake(20, kGeneCount * 100 + 6, W - 40, 54)];
-    note.numberOfLines = 3;
-    note.text = @"DNA 只能通过飞升获得：飞升门槛每轮 ×20，收益越高 DNA 越多。你投入的 DNA 强化等级越多，进化费用与下次飞升门槛越高（基因税）。";
-    note.font = [UIFont systemFontOfSize:10.5];
+    CGFloat noteY = top0 + 4 * (nh + tierGap) + nh + 14;
+    UILabel *note = [[UILabel alloc] initWithFrame:CGRectMake(18, noteY, W - 36, 66)];
+    note.numberOfLines = 4;
+    note.text = @"沿着连线逐个加点：点亮前置节点（Lv.1 起）才会解锁下一层。\nDNA 只能靠飞升获得；你投入的强化总等级越高，进化费与下次飞升门槛越高（基因税）。";
+    note.font = [UIFont systemFontOfSize:10];
     note.textColor = [UIColor colorWithWhite:1 alpha:0.35];
-    [geneScroll addSubview:note];
+    [self.geneScroll addSubview:note];
 
-    geneScroll.contentSize = CGSizeMake(W, kGeneCount * 100 + 70);
+    self.geneScroll.contentSize = CGSizeMake(W, noteY + 80);
 
     // ---- 变异 ----
     self.mutPage = [self makePageWithTitle:@"变异" subtitle:@"每次进化随机 3 选 1 · 本轮有效，飞升或重置后清空"];
@@ -1732,72 +1759,66 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     if (self.genePage.hidden) return;
     self.geneDnaLabel.text = FmtInt(self.dna);
 
-    for (NSInteger i = 0; i < (NSInteger)self.geneQtyBtns.count; i++) {
-        UIButton *qb = self.geneQtyBtns[i];
-        BOOL sel = (i == self.geneQtyMode);
-        qb.backgroundColor = [UIColor colorWithWhite:1 alpha:sel ? 0.14 : 0.05];
-        qb.layer.borderWidth = sel ? 1.5 : 0;
-        qb.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.85].CGColor;
-        [qb setTitleColor:[UIColor colorWithWhite:1 alpha:sel ? 1.0 : 0.5] forState:UIControlStateNormal];
-    }
+    for (NSInteger i = 0; i < kGeneNodeCount && i < (NSInteger)self.geneNodeCards.count; i++) {
+        GeneNodeDef nd = kGeneNodes[i];
+        UIButton *card = self.geneNodeCards[i];
+        UILabel *lvL = [card viewWithTag:1002];
+        UILabel *prL = [card viewWithTag:1003];
+        UILabel *lockL = [card viewWithTag:1004];
+        UILabel *nmL = [card viewWithTag:1001];
 
-    for (NSInteger i = 0; i < (NSInteger)self.geneBuyBtns.count; i++) {
-        UIButton *buy = self.geneBuyBtns[i];
-        UILabel *nm = self.geneNameLabels[i];
-        NSString *base = [NSString stringWithUTF8String:kGenes[i].name];
+        NSInteger lv = [self geneLevelFor:nd.gene];
+        BOOL unlocked = (nd.parent < 0) || ([self geneLevelFor:nd.parent] >= 1);
+        NSInteger cost = [self geneCostAtLevel:nd.gene];
 
-        if (i == 0) {
-            NSInteger olv = self.geneOfflineLevel;
-            NSInteger ok = [self geneBuyCountFor:0];
-            NSInteger ocost = [self geneCostSum:0 count:ok];
-            nm.text = [NSString stringWithFormat:@"%@ Lv.%@", base, FmtInt(olv)];
-            RollLabel *pr = self.genePriceRolls[0];
-            RollLabel *sr = self.geneSubRolls[0];
-            BOOL ocan = (self.dna >= ocost);
-            pr.text = [NSString stringWithFormat:@"%@ 🧬", FmtInt(ocost)];
-            pr.textColor = ocan ? [UIColor colorWithWhite:0 alpha:0.85] : [UIColor colorWithWhite:1 alpha:0.45];
-            sr.text = [NSString stringWithFormat:@"返还 %.0f%% · 上限 %.0f 小时%@", [self offlineReturnRate] * 100.0,
-                       [self offlineCapHours], (ok > 1) ? [NSString stringWithFormat:@" · +%@ 级", FmtInt(ok)] : @""];
-            sr.textColor = [UIColor colorWithWhite:1 alpha:0.55];
-            [buy setTitle:@"" forState:UIControlStateNormal];
-            buy.backgroundColor = ocan ? [UIColor colorWithRed:0.35 green:0.95 blue:0.55 alpha:0.9]
-                                       : [UIColor colorWithWhite:1 alpha:0.10];
-            continue;
+        lvL.text = [NSString stringWithFormat:@"Lv.%@", FmtInt(lv)];
+        nmL.textColor = unlocked ? [UIColor whiteColor] : [UIColor colorWithWhite:1 alpha:0.38];
+        lvL.textColor = unlocked ? [UIColor colorWithRed:0.82 green:0.68 blue:1 alpha:1]
+                                 : [UIColor colorWithWhite:1 alpha:0.30];
+
+        if (unlocked) {
+            lockL.text = @"";
+            prL.hidden = NO;
+            prL.text = [NSString stringWithFormat:@"🧬 %@ · 点一次 +1", FmtInt(cost)];
+            prL.textColor = (self.dna >= cost)
+                ? [UIColor colorWithRed:0.80 green:0.95 blue:0.62 alpha:1]
+                : [UIColor colorWithWhite:1 alpha:0.32];
+            card.backgroundColor = (lv > 0) ? [UIColor colorWithRed:0.32 green:0.20 blue:0.55 alpha:0.42]
+                                          : [UIColor colorWithWhite:1 alpha:0.06];
+            card.layer.borderColor = (lv > 0)
+                ? [UIColor colorWithRed:0.80 green:0.62 blue:1.0 alpha:0.85].CGColor
+                : [UIColor colorWithWhite:1 alpha:0.14].CGColor;
+        } else {
+            prL.hidden = YES;
+            UILabel *pn = nil;
+            for (NSInteger k = 0; k < kGeneNodeCount; k++)
+                if (kGeneNodes[k].gene == nd.parent) { pn = (UILabel *)[self.geneNodeCards[k] viewWithTag:1001]; break; }
+            lockL.text = [NSString stringWithFormat:@"🔒 需「%@」Lv.1", pn ? pn.text : @"前置"];
+            card.backgroundColor = [UIColor colorWithWhite:1 alpha:0.03];
+            card.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.08].CGColor;
         }
 
-        NSInteger lv = [self geneLevelFor:i];
-        NSInteger k = [self geneBuyCountFor:i];
-        NSInteger cost = [self geneCostSum:i count:k];
-        nm.text = [NSString stringWithFormat:@"%@ Lv.%@", base, FmtInt(lv)];
-        RollLabel *pr2 = self.genePriceRolls[i];
-        RollLabel *sr2 = self.geneSubRolls[i];
-        pr2.text = [NSString stringWithFormat:@"%@ 🧬", FmtInt(cost)];
-        sr2.text = (k > 1) ? [NSString stringWithFormat:@"+%@ 级", FmtInt(k)] : @"";
-        [buy setTitle:@"" forState:UIControlStateNormal];
-        BOOL can = (self.dna >= cost);
-        buy.backgroundColor = can ? [UIColor colorWithRed:0.35 green:0.95 blue:0.55 alpha:0.9]
-                                  : [UIColor colorWithWhite:1 alpha:0.10];
-        pr2.textColor = can ? [UIColor colorWithWhite:0 alpha:0.85] : [UIColor colorWithWhite:1 alpha:0.45];
+        id lnObj = self.geneNodeLines[i];
+        if ([lnObj isKindOfClass:[CAShapeLayer class]]) {
+            CAShapeLayer *ln = (CAShapeLayer *)lnObj;
+            CGRect pf = [self.geneNodeFrames[nd.parent] CGRectValue];
+            CGRect cf = [self.geneNodeFrames[i] CGRectValue];
+            CGPoint a = CGPointMake(CGRectGetMidX(pf), CGRectGetMaxY(pf));
+            CGPoint b = CGPointMake(CGRectGetMidX(cf), CGRectGetMinY(cf));
+            UIBezierPath *path = [UIBezierPath bezierPath];
+            [path moveToPoint:a];
+            CGPoint m1 = CGPointMake(a.x, a.y + 14), m2 = CGPointMake(b.x, b.y - 14);
+            [path addCurveToPoint:b controlPoint1:m1 controlPoint2:m2];
+            ln.path = path.CGPath;
+            BOOL live = (nd.parent < 0) ? YES : ([self geneLevelFor:nd.parent] >= 1);
+            ln.strokeColor = live
+                ? [UIColor colorWithRed:0.72 green:0.55 blue:1.0 alpha:0.65].CGColor
+                : [UIColor colorWithWhite:1 alpha:0.14].CGColor;
+        }
     }
 }
 
-- (void)onGeneRow:(UIButton *)b {
-    NSInteger i = b.tag;
-
-
-    NSInteger k = [self geneBuyCountFor:i];
-    NSInteger cost = [self geneCostSum:i count:k];
-    if (self.dna < cost && self.geneQtyMode == 2 && i != 0) {
-        // 最大档位时按买得起的级别收缩
-        k = [self geneMaxCountFor:i];
-        cost = [self geneCostSum:i count:k];
-    }
-    if (self.dna < cost) {
-        [self toast:[NSString stringWithFormat:@"DNA 不足（需要 %@🧬）", FmtInt(cost)]];
-        return;
-    }
-
-    self.dna -= cost;
+- (void)applyGeneBuy:(NSInteger)i count:(NSInteger)k {
     NSString *msg = nil;
     switch (i) {
         case 0:
@@ -1816,7 +1837,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
             break;
         case 3:
             self.geneSporeLevel += k;
-            msg = [NSString stringWithFormat:@"✨ 孢子亲和 Lv.%@（孢子 +%@%%）", FmtInt(self.geneSporeLevel), FmtInt(40 * self.geneSporeLevel)];
+            msg = [NSString stringWithFormat:@"✨ 孢子亲和 Lv.%@（孢子增益 +%@%%）", FmtInt(self.geneSporeLevel), FmtInt(40 * self.geneSporeLevel)];
             break;
         case 4:
             self.geneAutoLevel += k;
@@ -1843,6 +1864,35 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     [self refreshGenePage];
     [self refreshAll];
     [self toast:msg];
+}
+
+- (void)onGeneNode:(UIButton *)b {
+    NSInteger i = b.tag;
+    if (i < 0 || i >= kGeneNodeCount) return;
+    GeneNodeDef nd = kGeneNodes[i];
+    if (nd.parent >= 0 && [self geneLevelFor:nd.parent] < 1) {
+        NSString *pre = @"前置技能";
+        for (NSInteger k = 0; k < kGeneNodeCount; k++)
+            if (kGeneNodes[k].gene == nd.parent) {
+                UILabel *pnL = (UILabel *)[self.geneNodeCards[k] viewWithTag:1001];
+                pre = pnL.text; break;
+            }
+        [self toast:[NSString stringWithFormat:@"🔒 先点亮「%@」Lv.1", pre]];
+        return;
+    }
+    NSInteger cost = [self geneCostAtLevel:nd.gene];
+    if (self.dna < cost) {
+        [self toast:[NSString stringWithFormat:@"DNA 不足（需要 %@ 🧬）", FmtInt(cost)]];
+        return;
+    }
+    self.dna -= cost;
+    [self applyGeneBuy:nd.gene count:1];
+    UIButton *card = self.geneNodeCards[i];
+    [UIView animateWithDuration:0.12 animations:^{ card.transform = CGAffineTransformMakeScale(0.94, 0.94); }
+                     completion:^(BOOL f) {
+        [UIView animateWithDuration:0.18 animations:^{ card.transform = CGAffineTransformIdentity; }];
+    }];
+    [self playSFX:@"buy"];
 }
 
 - (void)refreshMutPage {

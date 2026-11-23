@@ -680,6 +680,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 
 
 @property (nonatomic, strong) UILabel *autoLabel;
+@property (nonatomic, strong) UILabel *sporeBuffPill;
 @property (nonatomic, strong) UILabel *rateLabel;
 @property (nonatomic, strong) UIButton *dnaBtn;
 @property (nonatomic, strong) UILabel *creatureNameLabel;
@@ -1090,6 +1091,18 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     self.autoLabel.font = [UIFont monospacedDigitSystemFontOfSize:11 weight:UIFontWeightMedium];
     self.autoLabel.textColor = [UIColor colorWithWhite:1 alpha:0.7];
     [self.view addSubview:self.autoLabel];
+
+    self.sporeBuffPill = [[UILabel alloc] initWithFrame:CGRectMake(W - 158, 74, 140, 22)];
+    self.sporeBuffPill.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightBold];
+    self.sporeBuffPill.textColor = [UIColor colorWithRed:1.0 green:0.86 blue:0.42 alpha:1];
+    self.sporeBuffPill.backgroundColor = [UIColor colorWithRed:0.55 green:0.36 blue:0.03 alpha:0.55];
+    self.sporeBuffPill.textAlignment = NSTextAlignmentCenter;
+    self.sporeBuffPill.layer.cornerRadius = 11;
+    self.sporeBuffPill.clipsToBounds = YES;
+    self.sporeBuffPill.layer.borderWidth = 1.2;
+    self.sporeBuffPill.layer.borderColor = [UIColor colorWithRed:1.0 green:0.80 blue:0.30 alpha:0.9].CGColor;
+    self.sporeBuffPill.hidden = YES;
+    [self.view addSubview:self.sporeBuffPill];
 
     self.rateLabel = [[UILabel alloc] initWithFrame:CGRectMake(18, 98, W - 120, 13)];
     self.rateLabel.font = [UIFont systemFontOfSize:10];
@@ -2622,10 +2635,8 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     [self updateArtForStage:self.stage];
     [self updateMusicForEra:[self eraIndexForStage:self.stage]];
     // 顶部数字由 CADisplayLink 平滑驱动，这里不再直接赋值，避免跳动
-    NSTimeInterval sporeLeft = self.sporeBoostEnd - [[NSDate date] timeIntervalSince1970];
-    self.autoLabel.text = (sporeLeft > 0)
-        ? [NSString stringWithFormat:@"💧 自动 +%@/秒   ✨×%.0f %lds", FmtNum([self totalProd]), self.sporeBoostMult, (long)ceil(sporeLeft)]
-        : [NSString stringWithFormat:@"💧 自动 +%@/秒", FmtNum([self totalProd])];
+    self.autoLabel.text = [NSString stringWithFormat:@"💧 自动 +%@/秒", FmtNum([self totalProd])];
+    [self updateSporePill];
     self.rateLabel.text = [NSString stringWithFormat:@"👆 点击 %@/次    ⏳ 离线收益 %@",
                            FmtNum([self tapPower]),
                            ([self geneEffLevel:0] > 0)
@@ -3305,10 +3316,10 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
             self.sporeBoostEnd = 0;
             self.sporeBoostMult = 1.0;
             [self toast:@"✨ 孢子增益结束"];
+            [self updateSporePill];
             [self refreshDynamic];
         } else {
-            self.autoLabel.text = [NSString stringWithFormat:@"💧 自动 +%@/秒   ✨×%.0f %lds",
-                                   FmtNum([self totalProd]), self.sporeBoostMult, (long)ceil(left)];
+            [self updateSporePill];
         }
     }
 
@@ -3542,6 +3553,69 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
 
 // ================= 收益飘字 =================
 // 所有增加能量的来源统一走这里，前缀 + 颜色区分来源
+- (void)updateSporePill {
+    NSTimeInterval left = self.sporeBoostEnd - [[NSDate date] timeIntervalSince1970];
+    if (left > 0) {
+        self.sporeBuffPill.text = [NSString stringWithFormat:@"✨ ×%.0f  %.0fs", self.sporeBoostMult, ceil(left)];
+        self.sporeBuffPill.hidden = NO;
+        [self.view bringSubviewToFront:self.sporeBuffPill];
+    } else {
+        self.sporeBuffPill.hidden = YES;
+    }
+}
+
+- (void)sporeBanner:(NSString *)title value:(NSString *)value detail:(NSString *)detail accent:(UIColor *)accent {
+    CGFloat W = self.view.bounds.size.width, H = self.view.bounds.size.height;
+    UIView *card = [[UIView alloc] initWithFrame:CGRectMake(0, 0, W - 48, 138)];
+    card.center = CGPointMake(W / 2, H * 0.33);
+    card.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.94];
+    card.layer.cornerRadius = 22;
+    card.layer.borderWidth = 2.5;
+    card.layer.borderColor = accent.CGColor;
+    card.layer.shadowColor = accent.CGColor;
+    card.layer.shadowOpacity = 0.75;
+    card.layer.shadowRadius = 20;
+    card.layer.shadowOffset = CGSizeZero;
+
+    UILabel *t1 = [[UILabel alloc] initWithFrame:CGRectMake(14, 14, card.bounds.size.width - 28, 22)];
+    t1.text = title; t1.textAlignment = NSTextAlignmentCenter;
+    t1.font = [UIFont boldSystemFontOfSize:17];
+    t1.textColor = accent;
+    [card addSubview:t1];
+
+    UILabel *t2 = [[UILabel alloc] initWithFrame:CGRectMake(10, 40, card.bounds.size.width - 20, 56)];
+    t2.text = value; t2.textAlignment = NSTextAlignmentCenter;
+    t2.font = [UIFont monospacedDigitSystemFontOfSize:44 weight:UIFontWeightHeavy];
+    t2.textColor = [UIColor whiteColor];
+    t2.adjustsFontSizeToFitWidth = YES;
+    t2.minimumScaleFactor = 0.35;
+    t2.layer.shadowColor = accent.CGColor;
+    t2.layer.shadowOpacity = 0.9;
+    t2.layer.shadowRadius = 10;
+    t2.layer.shadowOffset = CGSizeZero;
+    [card addSubview:t2];
+
+    UILabel *t3 = [[UILabel alloc] initWithFrame:CGRectMake(14, 96, card.bounds.size.width - 28, 24)];
+    t3.text = detail; t3.textAlignment = NSTextAlignmentCenter;
+    t3.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    t3.textColor = [UIColor colorWithRed:0.95 green:0.90 blue:0.75 alpha:0.9];
+    [card addSubview:t3];
+
+    card.alpha = 0;
+    card.transform = CGAffineTransformMakeScale(0.55, 0.55);
+    [self.view addSubview:card];
+    [self.view bringSubviewToFront:card];
+    [UIView animateWithDuration:0.28 delay:0 usingSpringWithDamping:0.6 initialSpringVelocity:0.8 options:0 animations:^{
+        card.alpha = 1.0;
+        card.transform = CGAffineTransformIdentity;
+    } completion:nil];
+    [UIView animateWithDuration:0.45 delay:2.6 options:0 animations:^{
+        card.alpha = 0;
+        card.center = CGPointMake(card.center.x, card.center.y - 48);
+        card.transform = CGAffineTransformMakeScale(1.06, 1.06);
+    } completion:^(BOOL f) { [card removeFromSuperview]; }];
+}
+
 - (void)floatText:(NSString *)text color:(UIColor *)color at:(CGPoint)pt {
     UILabel *lab = [[UILabel alloc] init];
     lab.text = text;
@@ -3916,19 +3990,23 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         self.totalEarned += reward;
         [self floatGain:reward prefix:@"⏩" color:[UIColor colorWithRed:1.0 green:0.72 blue:0.20 alpha:1]
                      size:24 at:spt rise:90];
-        [self toast:[NSString stringWithFormat:@"⏩ 孢子·时间跃迁：直接获得 8 分钟产出 ⚡+%@", FmtNum(reward)]];
+        [self sporeBanner:@"⏩ 孢子 · 时间跃迁" value:[NSString stringWithFormat:@"+%@", FmtNum(reward)]
+                   detail:@"直接到账接下来 8 分钟的产出" accent:gold];
     } else {
         double base = (kind == 1) ? 10.0 : 3.0;
         double dur  = (kind == 1) ? 12.0 : 20.0;
         double mult = MIN(80.0, base * amp);
         self.sporeBoostEnd = now + dur;
         self.sporeBoostMult = mult;
+        [self updateSporePill];
         [self flashScreen:gold alpha:(kind == 1 ? 0.42 : 0.24)];
         [self shakeScreen:(kind == 1 ? 8 : 5)];
         [self shockwaveAt:spt color:gold maxRadius:MIN(self.view.bounds.size.width, 420)];
         [self sparkBurstAt:spt color:gold count:(kind == 1 ? 40 : 24) speed:260];
-        [self toast:[NSString stringWithFormat:@"✨ 孢子·%@：产出 ×%.0f，持续 %.0f 秒",
-                    (kind == 1 ? @"爆发" : @"涌动"), mult, dur]];
+        [self sporeBanner:[NSString stringWithFormat:@"✨ 孢子 · %@", (kind == 1 ? @"爆发" : @"涌动")]
+                     value:[NSString stringWithFormat:@"×%.0f", mult]
+                    detail:[NSString stringWithFormat:@"接下来 %.0f 秒，全部产出 ×%.0f", dur, mult]
+                    accent:gold];
         [self floatText:[NSString stringWithFormat:@"×%.0f", mult] color:gold at:spt];
     }
     [self playSFX:@"spore"];

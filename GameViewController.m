@@ -647,6 +647,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     BOOL _achDone[16];          // 成就是否已达成
     BOOL _bossDone[64];         // 各守关者是否通过
     NSInteger _bossFails[64];   // 本次轮回各守关者的失败次数（满 2 次封锁，须飞升重开）
+    BOOL _bossDoneRound[64];    // 本次轮回是否已通过（飞升清零，保证每轮都要闯关）
 }
 // 运行状态
 @property (nonatomic) double energy;
@@ -967,12 +968,12 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 - (double)evoGeneTax { return MIN(25.0, pow(1.03, (double)[self totalGeneLevels])); }
 
 - (NSInteger)eventPressure { return MIN(8, self.autoDiff + MIN(3, self.fastEvoCount / 6)); }
-// 自适应难度按指数抬升：一次“极快进化”就能明显改变强度
-- (double)autoProdMult { return pow(0.72, (double)self.autoDiff); }
-- (double)autoCostMult { return pow(1.35, (double)self.autoDiff); }
-- (double)autoEvoMult  { return pow(1.45, (double)self.autoDiff); }
-- (double)autoAscMult  { return pow(1.50, (double)self.autoDiff); }
-- (double)autoDNAMult  { return pow(0.70, (double)self.autoDiff); }
+// 自适应难度按当前压力实时生效（当轮进化过快也立刻变难），飞升后固化为新的基线
+- (double)autoProdMult { return pow(0.92, (double)[self eventPressure]); }
+- (double)autoCostMult { return pow(1.08, (double)[self eventPressure]); }
+- (double)autoEvoMult  { return pow(1.14, (double)[self eventPressure]); }
+- (double)autoAscMult  { return pow(1.15, (double)[self eventPressure]); }
+- (double)autoDNAMult  { return pow(0.85, (double)[self eventPressure]); }
 
 - (double)ascThreshold {
     // 首次 2e7；之后每次按 20 倍递增：4e8 / 8e9 / 1.6e11 …，再叠加基因税
@@ -1041,8 +1042,10 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
         _achDone[i] = [d boolForKey:[NSString stringWithFormat:@"v3_ach_%ld", (long)i]];
     for (NSInteger i = 0; i < kStageCount; i++)
         _bossDone[i] = [d boolForKey:[NSString stringWithFormat:@"v3_boss_%ld", (long)i]];
-    for (NSInteger i = 0; i < 64; i++)
+    for (NSInteger i = 0; i < 64; i++) {
         _bossFails[i] = [d integerForKey:[NSString stringWithFormat:@"v3_bossfail_%ld", (long)i]];
+        _bossDoneRound[i] = [d boolForKey:[NSString stringWithFormat:@"v3_bossr_%ld", (long)i]];
+    }
     [self applyOffline];
 }
 
@@ -1081,8 +1084,10 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
         [d setBool:_achDone[i] forKey:[NSString stringWithFormat:@"v3_ach_%ld", (long)i]];
     for (NSInteger i = 0; i < kStageCount; i++)
         [d setBool:_bossDone[i] forKey:[NSString stringWithFormat:@"v3_boss_%ld", (long)i]];
-    for (NSInteger i = 0; i < 64; i++)
+    for (NSInteger i = 0; i < 64; i++) {
         [d setInteger:_bossFails[i] forKey:[NSString stringWithFormat:@"v3_bossfail_%ld", (long)i]];
+        [d setBool:_bossDoneRound[i] forKey:[NSString stringWithFormat:@"v3_bossr_%ld", (long)i]];
+    }
     [d setDouble:[[NSDate date] timeIntervalSince1970] forKey:@"v3_lastSeen"];
     [d synchronize];
 }
@@ -2807,7 +2812,10 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
         } else {
         self.ringFill.strokeEnd = MIN(1.0, self.energy / cost);
         BOOL can = self.energy >= cost;
-        self.evolveRoll.text = [NSString stringWithFormat:@"进化 %@ %@   ·   ⚡ %@", StageEmoji(self.stage + 1), StageName(self.stage + 1), FmtNum(cost)];
+        NSInteger pr = [self eventPressure];
+        self.evolveRoll.text = (pr > 0)
+            ? [NSString stringWithFormat:@"进化 %@ %@ · ⚡ %@ · 压力×%.1f", StageEmoji(self.stage + 1), StageName(self.stage + 1), FmtNum(cost), pow(1.14, (double)pr)]
+            : [NSString stringWithFormat:@"进化 %@ %@   ·   ⚡ %@", StageEmoji(self.stage + 1), StageName(self.stage + 1), FmtNum(cost)];
         self.evolveBtn.backgroundColor = can
             ? [UIColor colorWithRed:0.16 green:0.62 blue:0.36 alpha:1]
             : [UIColor colorWithWhite:1 alpha:0.09];
@@ -2938,7 +2946,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     else if (t >= 30) gap = 3;
     else if (t >= 15) gap = 4;
     if (t % gap != 0) return NO;
-    return !_bossDone[t];
+    return !_bossDoneRound[t];
 }
 
 - (NSInteger)bossCount {
@@ -3084,6 +3092,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     self.bossFill = nil;
     if (win) {
         _bossDone[t] = YES;
+        _bossDoneRound[t] = YES;
         _bossFails[t] = 0;
         NSInteger reward = 5 + (t / 6) * 4;
         self.dna += reward;
@@ -4040,7 +4049,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         [self startBossForStage:self.stage + 1];
         return;
     }
-    double cost = kEvolveCost[self.stage + 1] * kEvolveMult * [self difficultyEvoMult] * [self evoGeneTax];
+    double cost = kEvolveCost[self.stage + 1] * kEvolveMult * [self difficultyEvoMult] * [self evoGeneTax] * [self autoEvoMult];
     if (self.energy < cost) { [self toast:@"能量不足，继续积攒！"]; return; }
     self.energy -= cost;
     if (self.energy < 0.0) self.energy = 0.0;
@@ -4309,8 +4318,8 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     double nextProd = MAX(0.25, pow(0.85, (double)(self.ascensions + 1)));
     double nextCost = pow(1.22, (double)(self.ascensions + 1));
     NSInteger nextAuto = MIN(6, self.fastEvoCount / 3);
-    NSString *msg = [NSString stringWithFormat:@"本轮生命将归于起源，获得 %@ 🧬DNA 与 🔮 遗物点 +2。\nDNA 永久保留；能量、物种、变异路线将重置。\n\n⚠️ 下一轮难度提升：产出效率 ×%.2f、购买成本 ×%.2f、进化费用 ×%.2f。\n🎚 自适应难度：本轮进化过快 %ld 次 → 下一轮产出 ×%.2f、成本 ×%.2f、进化费 ×%.2f、飞升门槛 ×%.2f、守关血量 ×%.2f、DNA ×%.2f。", FmtInt(gain), nextProd, nextCost, pow(1.30, (double)(self.ascensions + 1)), (long)self.fastEvoCount, pow(0.72, (double)nextAuto), pow(1.35, (double)nextAuto),
-               pow(1.45, (double)nextAuto), pow(1.50, (double)nextAuto), pow(1.35, (double)nextAuto), pow(0.70, (double)nextAuto)];
+    NSString *msg = [NSString stringWithFormat:@"本轮生命将归于起源，获得 %@ 🧬DNA 与 🔮 遗物点 +2。\nDNA 永久保留；能量、物种、变异路线将重置。\n\n⚠️ 下一轮难度提升：产出效率 ×%.2f、购买成本 ×%.2f、进化费用 ×%.2f。\n🎚 自适应难度：本轮进化过快 %ld 次 → 下一轮产出 ×%.2f、成本 ×%.2f、进化费 ×%.2f、飞升门槛 ×%.2f、守关血量 ×%.2f、DNA ×%.2f。", FmtInt(gain), nextProd, nextCost, pow(1.30, (double)(self.ascensions + 1)), (long)self.fastEvoCount, pow(0.92, (double)(nextAuto * 3)), pow(1.08, (double)(nextAuto * 3)),
+               pow(1.14, (double)(nextAuto * 3)), pow(1.15, (double)(nextAuto * 3)), pow(1.35, (double)(nextAuto * 3)), pow(0.85, (double)(nextAuto * 3))];
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"🕊 飞升" message:msg preferredStyle:UIAlertControllerStyleAlert];
     [ac addAction:[UIAlertAction actionWithTitle:@"再想想" style:UIAlertActionStyleCancel handler:nil]];
     [ac addAction:[UIAlertAction actionWithTitle:@"飞升！" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
@@ -4322,7 +4331,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         self.runEarned = 0;
         self.stage = 0;
         self.combo = 1.0;
-        for (NSInteger i = 0; i < 64; i++) _bossFails[i] = 0;
+        for (NSInteger i = 0; i < 64; i++) { _bossFails[i] = 0; _bossDoneRound[i] = NO; }
         // 按本轮实际进化速度固化自适应难度（快则加难，慢则回落）
         self.autoDiff = MIN(6, self.fastEvoCount / 3);   // 3 点过快 ≈ 1 级难度
         self.fastEvoCount = 0;
@@ -4360,6 +4369,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         self.totalEarned = 0;
         self.maxStage = 0; self.relicPoints = 0; self.totalTaps = 0;
         for (NSInteger i = 0; i < kRelicCount; i++) _relicLv[i] = 0;
+        for (NSInteger i = 0; i < 64; i++) { _bossDoneRound[i] = NO; _bossDone[i] = NO; }
         for (NSInteger i = 0; i < 8; i++) _achDone[i] = NO;
         for (NSInteger i = 0; i < kStageCount; i++) _bossDone[i] = NO;
 

@@ -2874,7 +2874,8 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     [ov addSubview:self.bossTimeLabel];
 
     UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(0, H * 0.60, W, 20)];
-    hint.text = @"连续点击守关者造成伤害，40 秒内击破";
+    hint.text = [NSString stringWithFormat:@"连续点击守关者造成伤害 · 40 秒内点破（约 %.0f 次）",
+                 MAX(1.0, self.bossMaxHP / ((0.1 + [self totalProd] * 0.05) * [self mutTapMult] * [self geneTapMult] * [self relicTapMult]))];
     hint.textAlignment = NSTextAlignmentCenter;
     hint.font = [UIFont systemFontOfSize:11.5];
     hint.textColor = [UIColor colorWithWhite:1 alpha:0.45];
@@ -2885,8 +2886,11 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     [tap addTarget:self action:@selector(onBossTap) forControlEvents:UIControlEventTouchUpInside];
     [ov addSubview:tap];
 
-    double base = (1.0 + [self totalProd] * 0.08) * [self mutTapMult] * [self geneTapMult] * [self relicTapMult];
-    self.bossMaxHP = MAX(1.0, 55.0 * base);
+    // 守关者血量按“需要点多少次”定，随关卡递增；基础点击取不含连击的裸伤害
+    double base = (0.1 + [self totalProd] * 0.05) * [self mutTapMult] * [self geneTapMult] * [self relicTapMult];
+    NSInteger gateIdx = MAX(0, (t / 6) - 1);
+    double needHits = 220.0 + 80.0 * (double)gateIdx;
+    self.bossMaxHP = MAX(1.0, needHits * base);
     self.bossHP = self.bossMaxHP;
     self.bossTarget = t;
     self.bossEnd = [[NSDate date] timeIntervalSince1970] + 40.0;

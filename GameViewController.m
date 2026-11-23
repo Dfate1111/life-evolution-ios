@@ -3918,9 +3918,9 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
                      size:24 at:spt rise:90];
         [self toast:[NSString stringWithFormat:@"⏩ 孢子·时间跃迁：直接获得 8 分钟产出 ⚡+%@", FmtNum(reward)]];
     } else {
-        double base = (kind == 1) ? 6.0 : 2.0;
-        double dur  = (kind == 1) ? 10.0 : 20.0;
-        double mult = MIN(60.0, base * amp);
+        double base = (kind == 1) ? 10.0 : 3.0;
+        double dur  = (kind == 1) ? 12.0 : 20.0;
+        double mult = MIN(80.0, base * amp);
         self.sporeBoostEnd = now + dur;
         self.sporeBoostMult = mult;
         [self flashScreen:gold alpha:(kind == 1 ? 0.42 : 0.24)];

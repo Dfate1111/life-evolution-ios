@@ -667,6 +667,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @property (nonatomic) NSInteger buyQtyMode;      // 0:1 1:10 2:100 3:最大
 @property (nonatomic) BOOL sporeActive;
 @property (nonatomic) BOOL mutationSheetOpen;
+@property (nonatomic, strong) NSArray *mutationCandidates;   // 本轮 3 个候选变异（供 AI 挑选）
 
 // UI
 @property (nonatomic, strong) CAGradientLayer *bgLayer;
@@ -4456,6 +4457,14 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
 
     self.mutationDimView = dim;
     self.mutationCardView = card;
+    self.mutationCandidates = [pick copy];
+
+    if (self.aiOn) {
+        __weak typeof(self) ws = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [ws aiPickMutation];
+        });
+    }
 
     [UIView animateWithDuration:0.25 animations:^{
         dim.alpha = 1;
@@ -4673,6 +4682,70 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     self.aiTimer = nil;
 }
 
+// 托管收集能量：0.5 秒结算 5 次点击（等效 10 次/秒），只按一次飘字，不逐下震屏
+- (double)aiTapOnce {
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    self.totalTaps += 1;
+    if (now - self.lastTapTime <= 1.0) {
+        self.combo = MIN([self comboCap], self.combo + [self mutComboStep]);
+    } else {
+        self.combo = 1.0;
+    }
+    self.lastTapTime = now;
+
+    double gain = [self tapPower];
+    BOOL crit = NO;
+    double critChance = [self mutCritChance];
+    if (critChance > 0 && (double)arc4random_uniform(1000) / 1000.0 < critChance) { crit = YES; gain *= 3.0; }
+    double chain = 0;
+    if (crit && _muts[MutCritChain] > 0
+        && (double)arc4random_uniform(1000) / 1000.0 < MIN(0.6, 0.25 * (double)_muts[MutCritChain])) chain = gain;
+    double rain = 0;
+    if (_muts[MutSporeRain] > 0
+        && (double)arc4random_uniform(1000) / 1000.0 < MIN(0.24, 0.06 * (double)_muts[MutSporeRain])) {
+        rain = (MAX(50.0 * [self tapPower], 20.0 * [self totalProd]) + 10) * [self geneSporeMult]
+             * [self relicSporeMult] * (1.0 + 0.8 * (double)_muts[MutSpore]) * 0.6;
+    }
+    double total = gain + chain + rain;
+    self.energy += total;
+    self.runEarned += total;
+    self.totalEarned += total;
+    self.energyPop = MIN(1.0, self.energyPop + (crit ? 0.9 : 0.35));
+    return total;
+}
+
+- (void)aiTapBurst {
+    double sum = 0.0;
+    for (NSInteger i = 0; i < 5; i++) sum += [self aiTapOnce];
+    [self refreshDynamic];
+    if (sum > 0 && (NSInteger)arc4random_uniform(2) == 0) {
+        [self floatGain:sum prefix:@"🤖" color:[UIColor colorWithRed:0.72 green:0.66 blue:1.0 alpha:1]
+                     size:16 at:[self creatureCenterInView] rise:70];
+    }
+}
+
+// 托管选变异：按"对自动玩法收益最大"排序（高效代谢 > 掠食强化 > 暴击系 > 连击系 > 孢子系）
+- (void)aiPickMutation {
+    if (!self.aiOn || !self.mutationSheetOpen || self.mutationCandidates.count == 0) return;
+    NSArray *weight = @[@95, @100, @70, @40, @50, @45, @55, @35, @55, @30, @60];
+    NSInteger best = -1;
+    double bestScore = -1.0;
+    for (NSNumber *n in self.mutationCandidates) {
+        NSInteger m = [n integerValue];
+        if (m < 0 || m >= (NSInteger)weight.count) continue;
+        double sc = [weight[m] doubleValue] + (double)arc4random_uniform(12) * 0.1;
+        if (sc > bestScore) { bestScore = sc; best = m; }
+    }
+    if (best < 0) best = [self.mutationCandidates[0] integerValue];
+    _muts[best] += 1;
+    [self dismissMutationSheet];
+    [self refreshAll];
+    [self saveState];
+    [self toast:[NSString stringWithFormat:@"🤖 已替你选：%@ %@ ×%ld",
+               [NSString stringWithUTF8String:kMuts[best].icon],
+               [NSString stringWithUTF8String:kMuts[best].name], (long)_muts[best]]];
+}
+
 // 托管打守关者：0.5 秒结算 4 次点击（等效 8 次/秒，人手极限），特效降频避免卡顿
 - (void)aiHitBoss {
     if (self.bossOverlay == nil) return;
@@ -4697,6 +4770,8 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
 
     // 1) 有试炼在打：全力攻击
     if (self.bossOverlay != nil) { [self aiHitBoss]; return; }
+    // 0) 平时先把手点击打跑满（等效 10 次/秒）
+    [self aiTapBurst];
     // 2) 孢子出现就点
     if (self.sporeActive && self.sporeBtn != nil) [self onSpore];
     // 3) 负面事件可解除时按收益判断是否付钱

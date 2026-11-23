@@ -156,12 +156,12 @@ static const char *kLore[] = {
 
 typedef struct { const char *icon; const char *name; const char *desc; NSInteger cost; } Relic;
 static const Relic kRelics[] = {
-    {"🌊", "潮汐之心", "全产出 +15%", 1},
-    {"🦴", "掠食之爪", "点击收益 +20%", 1},
-    {"👑", "孢子王冠", "孢子增益强度 +30%", 2},
-    {"🔑", "升维密钥", "飞升获得 DNA +10%", 2},
-    {"🪨", "起源遗骸", "飞升后每条产线额外 +5 级", 3},
-    {"🌫", "静默之幕", "时代事件持续时间 -25%", 2},
+    {"🌊", "潮汐之心", "全产出 +15%／级", 1},
+    {"🦴", "掠食之爪", "点击收益 +20%／级", 1},
+    {"👑", "孢子王冠", "孢子增益强度 +30%／级", 2},
+    {"🔑", "升维密钥", "飞升获得 DNA +10%／级", 2},
+    {"🪨", "起源遗骸", "飞升后每条产线额外 +5 级／级", 3},
+    {"🌫", "静默之幕", "时代事件时长 ×0.78／级（最低 0.35）", 2},
 };
 static const NSInteger kRelicCount = sizeof(kRelics) / sizeof(kRelics[0]);
 
@@ -643,7 +643,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 @interface GameViewController () {
     NSInteger _counts[64];      // 各生产线数量（形态上限 48）
     NSInteger _muts[16];        // 本轮变异次数
-    BOOL _relics[8];            // 遗物是否已购
+    NSInteger _relicLv[8];      // 遗物等级（0 = 未解锁）
     BOOL _achDone[16];          // 成就是否已达成
     BOOL _bossDone[64];         // 各守关者是否通过
     NSInteger _bossFails[64];   // 本次轮回各守关者的失败次数（满 2 次封锁，须飞升重开）
@@ -899,16 +899,16 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 - (double)geneSporeRateMult { return MAX(0.10, 1.0 - 0.10 * (double)[self geneEffLevel:7]); }
 
 // 起始遗泽：每条产线起始等级（每 2 级 +1，最多 60 级）
-- (NSInteger)geneStartLineLevel { return MIN((NSInteger)300, [self geneEffLevel:6] / 2 + (_relics[4] ? 5 : 0)); }
+- (NSInteger)geneStartLineLevel { return MIN((NSInteger)300, [self geneEffLevel:6] / 2 + 5 * _relicLv[4]); }
 
 // ---- 图鉴 / 遗物 / 时代事件 带来的全局加成 ----
 - (NSInteger)codexUnlocked { return MIN(self.maxStage + 1, kStageCount); }
 - (double)codexMult { return 1.0 + 0.02 * (double)[self codexUnlocked]; }
-- (double)relicProdMult   { return _relics[0] ? 1.15 : 1.0; }
-- (double)relicTapMult    { return _relics[1] ? 1.20 : 1.0; }
-- (double)relicSporeMult  { return _relics[2] ? 1.30 : 1.0; }
-- (double)relicAscendMult { return _relics[3] ? 1.10 : 1.0; }
-- (double)relicEventMult  { return _relics[5] ? 0.75 : 1.0; }
+- (double)relicProdMult   { return 1.0 + 0.15 * (double)_relicLv[0]; }
+- (double)relicTapMult    { return 1.0 + 0.20 * (double)_relicLv[1]; }
+- (double)relicSporeMult  { return 1.0 + 0.30 * (double)_relicLv[2]; }
+- (double)relicAscendMult { return 1.0 + 0.10 * (double)_relicLv[3]; }
+- (double)relicEventMult  { return MAX(0.35, pow(0.78, (double)_relicLv[5])); }
 - (double)eventProdMult {
     NSInteger p = [self eventPressure];
     if (self.eventKind == 1) return MAX(0.12, 0.50 - 0.06 * (double)p);   // 陨石
@@ -1032,7 +1032,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     self.relicPoints = [d integerForKey:@"v3_relicpts"];
     self.totalTaps = [d integerForKey:@"v3_taps"];
     for (NSInteger i = 0; i < kRelicCount; i++)
-        _relics[i] = [d boolForKey:[NSString stringWithFormat:@"v3_relic_%ld", (long)i]];
+        _relicLv[i] = [d integerForKey:[NSString stringWithFormat:@"v3_relic_%ld", (long)i]];
     for (NSInteger i = 0; i < 8; i++)
         _achDone[i] = [d boolForKey:[NSString stringWithFormat:@"v3_ach_%ld", (long)i]];
     for (NSInteger i = 0; i < kStageCount; i++)
@@ -1072,7 +1072,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     [d setInteger:self.relicPoints forKey:@"v3_relicpts"];
     [d setInteger:self.totalTaps forKey:@"v3_taps"];
     for (NSInteger i = 0; i < kRelicCount; i++)
-        [d setBool:_relics[i] forKey:[NSString stringWithFormat:@"v3_relic_%ld", (long)i]];
+        [d setInteger:_relicLv[i] forKey:[NSString stringWithFormat:@"v3_relic_%ld", (long)i]];
     for (NSInteger i = 0; i < 8; i++)
         [d setBool:_achDone[i] forKey:[NSString stringWithFormat:@"v3_ach_%ld", (long)i]];
     for (NSInteger i = 0; i < kStageCount; i++)
@@ -2056,7 +2056,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
         [card addSubview:ds];
 
         UIButton *buy = [UIButton buttonWithType:UIButtonTypeCustom];
-        buy.frame = CGRectMake(W - 28 - 84, 22, 76, 32);
+        buy.frame = CGRectMake(W - 28 - 96, 22, 88, 32);
         buy.layer.cornerRadius = 16;
         buy.titleLabel.font = [UIFont boldSystemFontOfSize:12];
         [buy setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
@@ -2094,13 +2094,14 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
                                  (long)self.relicPoints, (long)self.ascensions];
     for (NSInteger i = 0; i < (NSInteger)self.relicBtns.count; i++) {
         UIButton *b = self.relicBtns[i];
-        Relic r = kRelics[i];
-        if (_relics[i]) {
-            [b setTitle:@"已拥有" forState:UIControlStateNormal];
+        NSInteger lv = _relicLv[i];
+        if (lv >= 20) {
+            [b setTitle:[NSString stringWithFormat:@"Lv.%ld 满级", (long)lv] forState:UIControlStateNormal];
             b.backgroundColor = [UIColor colorWithWhite:1 alpha:0.12];
         } else {
-            [b setTitle:[NSString stringWithFormat:@"%ld 🔮", (long)r.cost] forState:UIControlStateNormal];
-            b.backgroundColor = (self.relicPoints >= r.cost)
+            NSInteger cost = [self relicCost:i];
+            [b setTitle:[NSString stringWithFormat:@"Lv.%ld · %ld🔮", (long)lv, (long)cost] forState:UIControlStateNormal];
+            b.backgroundColor = (self.relicPoints >= cost)
                 ? [UIColor colorWithRed:0.45 green:0.35 blue:0.95 alpha:0.95]
                 : [UIColor colorWithWhite:1 alpha:0.10];
         }
@@ -2120,18 +2121,29 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     }
 }
 
+- (NSInteger)relicCost:(NSInteger)i {
+    if (i < 0 || i >= kRelicCount) return 9999;
+    double base = (double)kRelics[i].cost;
+    return MAX(1, (NSInteger)ceil(base * pow(1.75, (double)_relicLv[i])));
+}
+
 - (void)onRelicTap:(UIButton *)b {
     NSInteger i = b.tag;
     if (i < 0 || i >= kRelicCount) return;
-    if (_relics[i]) { [self toast:@"这件遗物已经拥有了"]; return; }
-    NSInteger cost = kRelics[i].cost;
-    if (self.relicPoints < cost) { [self toast:[NSString stringWithFormat:@"遗物点不足（需要 %ld）", (long)cost]]; return; }
+    if (_relicLv[i] >= 20) { [self toast:@"这件遗物已经满级了"]; return; }
+    NSInteger cost = [self relicCost:i];
+    if (self.relicPoints < cost) {
+        [self toast:[NSString stringWithFormat:@"遗物点不足（需要 %ld 🔮）", (long)cost]];
+        return;
+    }
     self.relicPoints -= cost;
-    _relics[i] = YES;
+    _relicLv[i] += 1;
     [self saveState];
     [self refreshRelicPage];
     [self refreshAll];
-    [self toast:[NSString stringWithFormat:@"🔮 获得遗物「%@」", [NSString stringWithUTF8String:kRelics[i].name]]];
+    [self toast:[NSString stringWithFormat:@"🔮 遗物「%@」升至 Lv.%ld（- %ld🔮，剩余 %ld）",
+               [NSString stringWithUTF8String:kRelics[i].name], (long)_relicLv[i], (long)cost, (long)self.relicPoints]];
+    [self vibrateLight];
     [self sparkBurstAt:[self creatureCenterInView] color:[UIColor colorWithRed:0.75 green:0.55 blue:1 alpha:1] count:26 speed:200];
 }
 
@@ -4212,7 +4224,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     double nextProd = MAX(0.25, pow(0.85, (double)(self.ascensions + 1)));
     double nextCost = pow(1.22, (double)(self.ascensions + 1));
     NSInteger nextAuto = MIN(6, self.fastEvoCount / 3);
-    NSString *msg = [NSString stringWithFormat:@"本轮生命将归于起源，获得 %@ 🧬DNA。\nDNA 永久保留；能量、物种、变异路线将重置。\n\n⚠️ 下一轮难度提升：产出效率 ×%.2f、购买成本 ×%.2f、进化费用 ×%.2f。\n🎚 自适应难度：本轮进化过快 %ld 次 → 下一轮产出 ×%.2f、成本 ×%.2f、守关者血量 ×%.2f。", FmtInt(gain), nextProd, nextCost, pow(1.30, (double)(self.ascensions + 1)), (long)self.fastEvoCount, pow(0.90, (double)nextAuto), pow(1.12, (double)nextAuto), pow(1.20, (double)nextAuto)];
+    NSString *msg = [NSString stringWithFormat:@"本轮生命将归于起源，获得 %@ 🧬DNA 与 🔮 遗物点 +2。\nDNA 永久保留；能量、物种、变异路线将重置。\n\n⚠️ 下一轮难度提升：产出效率 ×%.2f、购买成本 ×%.2f、进化费用 ×%.2f。\n🎚 自适应难度：本轮进化过快 %ld 次 → 下一轮产出 ×%.2f、成本 ×%.2f、守关者血量 ×%.2f。", FmtInt(gain), nextProd, nextCost, pow(1.30, (double)(self.ascensions + 1)), (long)self.fastEvoCount, pow(0.90, (double)nextAuto), pow(1.12, (double)nextAuto), pow(1.20, (double)nextAuto)];
     UIAlertController *ac = [UIAlertController alertControllerWithTitle:@"🕊 飞升" message:msg preferredStyle:UIAlertControllerStyleAlert];
     [ac addAction:[UIAlertAction actionWithTitle:@"再想想" style:UIAlertActionStyleCancel handler:nil]];
     [ac addAction:[UIAlertAction actionWithTitle:@"飞升！" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
@@ -4246,7 +4258,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         [self rebuildRows];
         [self refreshAll];
         [self saveState];
-        [self toast:[NSString stringWithFormat:@"🕊 飞升成功！+%@🧬 新的轮回开始", FmtInt(gain)]];
+        [self toast:[NSString stringWithFormat:@"🕊 飞升成功！+%@🧬 · 🔮 遗物点 +2 · 新的轮回开始", FmtInt(gain)]];
     }]];
     [self presentViewController:ac animated:YES completion:nil];
 }
@@ -4261,7 +4273,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         self.geneAscendLevel = 0; self.geneStartLevel = 0; self.geneSporeRateLevel = 0; self.geneBossLevel = 0;
         self.totalEarned = 0;
         self.maxStage = 0; self.relicPoints = 0; self.totalTaps = 0;
-        for (NSInteger i = 0; i < kRelicCount; i++) _relics[i] = NO;
+        for (NSInteger i = 0; i < kRelicCount; i++) _relicLv[i] = 0;
         for (NSInteger i = 0; i < 8; i++) _achDone[i] = NO;
         for (NSInteger i = 0; i < kStageCount; i++) _bossDone[i] = NO;
 

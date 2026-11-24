@@ -79,7 +79,7 @@ static const NSInteger kStageCount = sizeof(kStages) / sizeof(kStages[0]);
 
 // 进化到第 i 阶段所需能量（i>=1）
 // 进化费用的整体倍率（越大越难进化）
-static const double kEvolveMult = 3.0;
+static const double kEvolveMult = 4.2;
 static const double kEvolveCost[] = {
     0, 100, 1200, 9000, 60000, 350000, 2.2e6, 1.4e7,
     9e7, 6e8, 4e9, 2.8e10, 2e11, 1.5e12, 1.2e13, 1e14,
@@ -179,12 +179,12 @@ static UIColor *StageAccent(NSInteger i) {
 static double BaseProd(NSInteger i)  { return 0.08 * pow(5.0, (double)i); }
 static double BaseCost(NSInteger i)  { return 18.0 * pow(5.0, (double)i); }
 // 单条产线每买一级的价格增长率（越大越难堆数量）
-static const double kCostGrowth = 1.18;
+static const double kCostGrowth = 1.20;
 
 // 里程碑门槛：每跨一级该产线产出 ×2，共 20 级（最高 66000 个）
 static const NSInteger kMileStones[] = {
-    10, 25, 50, 100, 150, 250, 400, 600, 900, 1400,
-    2000, 3000, 4500, 7000, 10000, 15000, 22000, 32000, 46000, 66000
+    10, 30, 70, 150, 300, 600, 1200, 2500, 5000, 10000,
+    20000, 40000, 80000, 160000
 };
 static const NSInteger kMileCount = sizeof(kMileStones) / sizeof(kMileStones[0]);
 
@@ -3201,11 +3201,10 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
 // ================= 守关者 · 试炼 =================
 - (BOOL)needsBossForStage:(NSInteger)t {
     if (t <= 0 || t >= kStageCount) return NO;
-    // 守关者出现间隔随形态推进收紧：6 级一次 → 4 级 → 3 级 → 2 级
-    NSInteger gap = 6;
-    if (t >= 48) gap = 2;
-    else if (t >= 30) gap = 3;
-    else if (t >= 15) gap = 4;
+    // 守关者出现间隔随形态推进收紧：4 级一次 → 3 级 → 2 级
+    NSInteger gap = 4;
+    if (t >= 30) gap = 2;
+    else if (t >= 12) gap = 3;
     if (t % gap != 0) return NO;
     return !_bossDoneRound[t];
 }

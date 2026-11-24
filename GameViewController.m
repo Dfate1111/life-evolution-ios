@@ -1181,6 +1181,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 }
 
 - (double)sporeBoostMul {
+    if (self.bossOverlay != nil) return 1.0;   // 试炼期间吃不到孢子强化
     if (self.sporeBoostEnd <= 0) return 1.0;
     return ([[NSDate date] timeIntervalSince1970] < self.sporeBoostEnd) ? MAX(1.0, self.sporeBoostMult) : 1.0;
 }
@@ -1227,7 +1228,8 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     NSInteger base = MAX(1, (NSInteger)floor(sqrt(self.runEarned / [self ascThreshold])));
     // 后期 DNA 收紧：每次飞升再乘 0.78，且自适应难度越高 DNA 越少
     double late = pow(0.78, (double)self.ascensions) * [self autoDNAMult];
-    return MAX(1, (NSInteger)floor(base * [self geneAscendMult] * [self relicAscendMult] * late));
+    double geneDNA = 1.0 + 0.02 * (double)MIN(200, [self totalGeneLevels]);   // 强化越多，飞升回收的 DNA 越多
+    return MAX(1, (NSInteger)floor(base * [self geneAscendMult] * [self relicAscendMult] * late * geneDNA));
 }
 
 // 成本
@@ -3268,9 +3270,20 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     self.bossTimeLabel.textColor = [UIColor colorWithRed:1 green:0.75 blue:0.35 alpha:1];
     [ov addSubview:self.bossTimeLabel];
 
+    // 先定血量：需求点击数随关卡递增，压力与 DNA 强化强度都会让守关者更硬
+    double base = (0.1 + [self totalProd] * 0.05) * [self mutTapMult] * [self geneTapMult] * [self relicTapMult];
+    NSInteger gateIdx = MAX(0, (t / 6) - 1);
+    double geneBossHp = 1.0 + 0.03 * (double)MIN(200, [self totalGeneLevels]);   // 基因点得越多越硬
+    double bossStrength = (1.0 + 0.35 * (double)[self eventPressure])
+                        * (1.0 + 0.05 * (double)MIN(20, self.bossRushCount)) * geneBossHp;
+    double needHits = (320.0 + 110.0 * (double)gateIdx) * bossStrength;
+    self.bossMaxHP = MAX(1.0, needHits * base);
+    self.bossHP = self.bossMaxHP;
+    self.bossTarget = t;
+    self.bossEnd = [[NSDate date] timeIntervalSince1970] + 40.0;
+
     UILabel *hint = [[UILabel alloc] initWithFrame:CGRectMake(0, H * 0.60, W, 20)];
-    hint.text = [NSString stringWithFormat:@"连续点击守关者造成伤害 · 40 秒内点破（约 %.0f 次）",
-                 MAX(1.0, self.bossMaxHP / (((0.1 + [self totalProd] * 0.05) * [self mutTapMult] * [self geneTapMult] * [self relicTapMult]) * [self geneBossMult]))];
+    hint.text = [NSString stringWithFormat:@"40 秒内点破 · 约 %.0f 次 · ⏸ 采集已暂停", needHits];
     hint.textAlignment = NSTextAlignmentCenter;
     hint.font = [UIFont systemFontOfSize:11.5];
     hint.textColor = [UIColor colorWithWhite:1 alpha:0.45];
@@ -3282,18 +3295,20 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     tap.bossOwner = (id<BossHitTarget>)self;
     [ov addSubview:tap];
 
-    // 守关者血量按“需要点多少次”定，随关卡递增；基础点击取不含连击的裸伤害
-    double base = (0.1 + [self totalProd] * 0.05) * [self mutTapMult] * [self geneTapMult] * [self relicTapMult];
-    NSInteger gateIdx = MAX(0, (t / 6) - 1);
-    // 进化过快带来的压力同样抬高守关者强度（最多 +120% 血量）
-    double bossStrength = (1.0 + 0.35 * (double)[self eventPressure])
-                        * (1.0 + 0.05 * (double)MIN(20, self.bossRushCount));
-    double needHits = (220.0 + 80.0 * (double)gateIdx) * bossStrength;
-    self.bossMaxHP = MAX(1.0, needHits * base);
-    self.bossHP = self.bossMaxHP;
-    self.bossTarget = t;
-    self.bossEnd = [[NSDate date] timeIntervalSince1970] + 40.0;
+    UIButton *quit = [UIButton buttonWithType:UIButtonTypeCustom];
+    quit.frame = CGRectMake((W - 220) / 2.0, H * 0.655, 220, 36);
+    quit.backgroundColor = [UIColor colorWithWhite:1 alpha:0.10];
+    quit.layer.cornerRadius = 18;
+    quit.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
+    quit.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.25].CGColor;
+    [quit setTitle:@"🏳 退出试炼（消耗 1 次机会）" forState:UIControlStateNormal];
+    [quit setTitleColor:[UIColor colorWithWhite:1 alpha:0.75] forState:UIControlStateNormal];
+    quit.titleLabel.font = [UIFont systemFontOfSize:12.5 weight:UIFontWeightMedium];
+    [quit addTarget:self action:@selector(onBossQuit) forControlEvents:UIControlEventTouchUpInside];
+    [ov addSubview:quit];
+
     [self updateBossLabels];
+    self.autoLabel.text = @"💧 自动 +0/秒 · ⏸ 试炼中（采集暂停）";
 
     self.bossTimer = [NSTimer timerWithTimeInterval:0.1 target:self selector:@selector(bossTick) userInfo:nil repeats:YES];
     [[NSRunLoop mainRunLoop] addTimer:self.bossTimer forMode:NSRunLoopCommonModes];
@@ -3336,6 +3351,11 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
 
 - (void)onBossTap {
     [self damageBossAt:CGPointMake(self.view.bounds.size.width / 2, self.view.bounds.size.height * 0.3)];
+}
+
+- (void)onBossQuit {
+    if (self.bossOverlay == nil) return;
+    [self finishBoss:NO];   // 计一次失败，两次即封锁本关
 }
 
 - (void)bossTick {
@@ -3916,7 +3936,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
 - (void)onSecondTick {
     [self handleEventsAndAchievements];
     double autoGain = 0;
-    NSInteger autoHands = [self geneEffLevel:4];
+    NSInteger autoHands = (self.bossOverlay == nil) ? [self geneEffLevel:4] : 0;
     if (autoHands > 0) {
         autoGain = [self tapPower] * (double)autoHands;
         self.energyPop = MIN(1.0, self.energyPop + 0.18);
@@ -3955,7 +3975,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
 // ================= 主循环 =================
 - (void)tick {
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    double gain = [self totalProd] * 0.1;   // totalProd 已含加速与基因/变异加成
+    double gain = (self.bossOverlay == nil) ? [self totalProd] * 0.1 : 0.0;   // 试炼期间采集全停
     self.energy += gain;
     self.runEarned += gain;
     self.totalEarned += gain;

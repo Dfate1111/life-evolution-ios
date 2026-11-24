@@ -983,8 +983,8 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
              frame:CGRectMake(pad, y, inW, 17) align:NSTextAlignmentLeft lines:1 to:card];
     y += 19.0;
     [self putLabel:[NSString stringWithFormat:@"产出 ×%.2f  成本 ×%.2f  进化 ×%.2f\n门槛 ×%.2f  守关 ×%.2f  DNA ×%.2f",
-                   pow(0.92, (double)(ap * 3)), pow(1.08, (double)(ap * 3)), pow(1.14, (double)(ap * 3)),
-                   pow(1.15, (double)(ap * 3)), pow(1.35, (double)(ap * 3)), pow(0.85, (double)(ap * 3))]
+                   pow(0.90, (double)(ap * 3)), pow(1.10, (double)(ap * 3)), pow(1.17, (double)(ap * 3)),
+                   pow(1.16, (double)(ap * 3)), pow(1.28, (double)(ap * 3)), pow(0.82, (double)(ap * 3))]
              font:[UIFont monospacedDigitSystemFontOfSize:11.5 weight:UIFontWeightRegular]
              color:[UIColor colorWithWhite:1 alpha:0.55] frame:CGRectMake(pad, y, inW, 34)
              align:NSTextAlignmentLeft lines:2 to:card];
@@ -1206,13 +1206,13 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
 - (double)ascGeneTax { return MIN(60.0, pow(1.05, (double)[self totalGeneLevels])); }
 - (double)evoGeneTax { return MIN(25.0, pow(1.03, (double)[self totalGeneLevels])); }
 
-- (NSInteger)eventPressure { return MIN(8, self.autoDiff + MIN(3, self.fastEvoCount / 6) + MIN(3, self.bossRushCount / 4)); }
+- (NSInteger)eventPressure { return MIN(12, self.autoDiff + MIN(4, self.fastEvoCount / 5) + MIN(4, self.bossRushCount / 3)); }
 // 自适应难度按当前压力实时生效（当轮进化过快也立刻变难），飞升后固化为新的基线
-- (double)autoProdMult { return pow(0.92, (double)[self eventPressure]); }
-- (double)autoCostMult { return pow(1.08, (double)[self eventPressure]); }
-- (double)autoEvoMult  { return pow(1.14, (double)[self eventPressure]); }
-- (double)autoAscMult  { return pow(1.15, (double)[self eventPressure]); }
-- (double)autoDNAMult  { return pow(0.85, (double)[self eventPressure]); }
+- (double)autoProdMult { return pow(0.90, (double)[self eventPressure]); }
+- (double)autoCostMult { return pow(1.10, (double)[self eventPressure]); }
+- (double)autoEvoMult  { return pow(1.17, (double)[self eventPressure]); }
+- (double)autoAscMult  { return pow(1.16, (double)[self eventPressure]); }
+- (double)autoDNAMult  { return pow(0.82, (double)[self eventPressure]); }
 
 - (double)ascThreshold {
     // 首次 2e7；之后每次按 20 倍递增：4e8 / 8e9 / 1.6e11 …，再叠加基因税
@@ -1272,7 +1272,7 @@ static NSArray<NSString *> *SplitComposedChars(NSString *s) {
     self.geneStartLevel = [d integerForKey:@"v3_gene_start"];
     self.geneSporeRateLevel = [d integerForKey:@"v3_gene_sporerate"];
     self.geneBossLevel = [d integerForKey:@"v3_gene_boss"];
-    self.autoDiff = MIN(6, MAX(0, (NSInteger)[d integerForKey:@"v3_autodiff"]));
+    self.autoDiff = MIN(8, MAX(0, (NSInteger)[d integerForKey:@"v3_autodiff"]));
     self.bossRushCount = MAX(0, MIN(40, (NSInteger)[d integerForKey:@"v3_bossrush"]));
     self.buyQtyMode = [d integerForKey:@"v3_qty"];
     self.maxStage = MAX([d integerForKey:@"v3_maxstage"], self.stage);
@@ -3075,7 +3075,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
         BOOL can = self.energy >= cost;
         NSInteger pr = [self eventPressure];
         self.evolveRoll.text = (pr > 0)
-            ? [NSString stringWithFormat:@"进化 %@ %@ · ⚡ %@ · 压力×%.1f", StageEmoji(self.stage + 1), StageName(self.stage + 1), FmtNum(cost), pow(1.14, (double)pr)]
+            ? [NSString stringWithFormat:@"进化 %@ %@ · ⚡ %@ · 压力×%.1f", StageEmoji(self.stage + 1), StageName(self.stage + 1), FmtNum(cost), pow(1.17, (double)pr)]
             : [NSString stringWithFormat:@"进化 %@ %@   ·   ⚡ %@", StageEmoji(self.stage + 1), StageName(self.stage + 1), FmtNum(cost)];
         self.evolveBtn.backgroundColor = can
             ? [UIColor colorWithRed:0.16 green:0.62 blue:0.36 alpha:1]
@@ -3274,7 +3274,7 @@ static const NSInteger kAchRewards[] = {1, 1, 1, 2, 2, 1, 2, 1};
     double base = (0.1 + [self totalProd] * 0.05) * [self mutTapMult] * [self geneTapMult] * [self relicTapMult];
     NSInteger gateIdx = MAX(0, (t / 6) - 1);
     double geneBossHp = 1.0 + 0.03 * (double)MIN(200, [self totalGeneLevels]);   // 基因点得越多越硬
-    double bossStrength = (1.0 + 0.35 * (double)[self eventPressure])
+    double bossStrength = (1.0 + 0.28 * (double)[self eventPressure])
                         * (1.0 + 0.05 * (double)MIN(20, self.bossRushCount)) * geneBossHp;
     double needHits = (320.0 + 110.0 * (double)gateIdx) * bossStrength;
     self.bossMaxHP = MAX(1.0, needHits * base);
@@ -4617,7 +4617,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
     if (gain <= 0) return;
     double nextProd = MAX(0.25, pow(0.85, (double)(self.ascensions + 1)));
     double nextCost = pow(1.22, (double)(self.ascensions + 1));
-    NSInteger nextAuto = MIN(6, (self.fastEvoCount + self.bossRushCount * 2) / 3);
+    NSInteger nextAuto = MIN(8, (self.fastEvoCount + self.bossRushCount * 2) / 3);
     [AscendDialogView presentInView:self.view gain:gain prod:nextProd cost:nextCost
                                 evo:pow(1.30, (double)(self.ascensions + 1))
                                fast:self.fastEvoCount autoP:nextAuto
@@ -4632,7 +4632,7 @@ static NSString *EventEffectText(NSInteger k, double d, double gain) {
         self.combo = 1.0;
         for (NSInteger i = 0; i < 64; i++) { _bossFails[i] = 0; _bossDoneRound[i] = NO; }
         // 按本轮实际进化速度固化自适应难度（快则加难，慢则回落）
-        self.autoDiff = MIN(6, (self.fastEvoCount + self.bossRushCount * 2) / 3);   // 进化过快 + 秒破守关者都折算进下一轮基线
+        self.autoDiff = MIN(8, (self.fastEvoCount + self.bossRushCount * 2) / 3);   // 进化过快 + 秒破守关者都折算进下一轮基线
         self.fastEvoCount = 0;
         self.bossRushCount = 0;
         self.lastEvolveAt = 0;
